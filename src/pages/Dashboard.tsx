@@ -1,0 +1,217 @@
+import { useMemo } from 'react';
+import { useProject } from '@/contexts/ProjectContext';
+import { users, sprints } from '@/data/mockData';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { IssueTypeIcon, PriorityIcon } from '@/components/issues/IssueCard';
+import { STATUS_LABELS, Status, IssueType } from '@/types/jira';
+import { BarChart3, CheckCircle2, Clock, AlertTriangle, Users, Zap } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+export default function Dashboard() {
+  const { issues, currentProject } = useProject();
+  const navigate = useNavigate();
+
+  const sprintIssues = issues.filter(i => i.sprintId === 's1');
+  const activeSprint = sprints.find(s => s.id === 's1')!;
+
+  const stats = useMemo(() => {
+    const byStatus = { todo: 0, in_progress: 0, in_review: 0, done: 0 };
+    sprintIssues.forEach(i => byStatus[i.status]++);
+    const total = sprintIssues.length;
+    const donePercent = total > 0 ? Math.round((byStatus.done / total) * 100) : 0;
+    const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
+    const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
+
+    const byType: Record<string, number> = {};
+    sprintIssues.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
+
+    const byAssignee: Record<string, number> = {};
+    sprintIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
+
+    return { byStatus, total, donePercent, totalPoints, donePoints, byType, byAssignee };
+  }, [sprintIssues]);
+
+  const recentActivity = issues
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 5);
+
+  const statusColors: Record<Status, string> = {
+    todo: 'bg-status-todo',
+    in_progress: 'bg-status-progress',
+    in_review: 'bg-status-review',
+    done: 'bg-status-done',
+  };
+
+  return (
+    <div className="p-6 space-y-6 max-w-7xl">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-semibold text-foreground">{currentProject.name}</h1>
+        <p className="text-sm text-muted-foreground">{currentProject.description}</p>
+      </div>
+
+      {/* Sprint Stats Cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card className="border shadow-sm">
+          <CardContent className="pt-4 pb-4 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xs text-muted-foreground font-medium">Sprint Progress</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{stats.donePercent}%</p>
+              </div>
+              <div className="h-10 w-10 rounded-lg bg-jira-blue-light flex items-center justify-center">
+                <BarChart3 className="h-5 w-5 text-primary" />
+              </div>
+            </div>
+            <Progress value={stats.donePercent} className="mt-3 h-1.5" />
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardContent className="pt-4 pb-4 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xs text-muted-foreground font-medium">Completed</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{stats.byStatus.done}</p>
+              </div>
+              <div className="h-10 w-10 rounded-lg bg-jira-green-light flex items-center justify-center">
+                <CheckCircle2 className="h-5 w-5 text-jira-green" />
+              </div>
+            </div>
+            <p className="text-2xs text-muted-foreground mt-3">{stats.donePoints} of {stats.totalPoints} story points</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardContent className="pt-4 pb-4 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xs text-muted-foreground font-medium">In Progress</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{stats.byStatus.in_progress}</p>
+              </div>
+              <div className="h-10 w-10 rounded-lg bg-jira-blue-light flex items-center justify-center">
+                <Clock className="h-5 w-5 text-primary" />
+              </div>
+            </div>
+            <p className="text-2xs text-muted-foreground mt-3">{stats.byStatus.in_review} in review</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardContent className="pt-4 pb-4 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xs text-muted-foreground font-medium">To Do</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{stats.byStatus.todo}</p>
+              </div>
+              <div className="h-10 w-10 rounded-lg bg-jira-yellow-light flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5 text-jira-yellow" />
+              </div>
+            </div>
+            <p className="text-2xs text-muted-foreground mt-3">{stats.total} total in sprint</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-[1fr_320px] gap-6">
+        {/* Recent Activity */}
+        <Card className="border shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Recent Activity</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {recentActivity.map(issue => {
+              const assignee = issue.assigneeId ? users.find(u => u.id === issue.assigneeId) : null;
+              return (
+                <div key={issue.id} className="flex items-center gap-3 p-2 rounded-md hover:bg-accent/50 cursor-pointer transition-colors"
+                  onClick={() => navigate('/board')}>
+                  <IssueTypeIcon type={issue.type} className="shrink-0" />
+                  <span className="text-2xs font-medium text-muted-foreground shrink-0">{issue.key}</span>
+                  <span className="text-sm truncate flex-1">{issue.title}</span>
+                  <Badge variant="outline" className="text-2xs shrink-0">{STATUS_LABELS[issue.status]}</Badge>
+                  {assignee && (
+                    <Avatar className="h-5 w-5 shrink-0">
+                      <AvatarFallback className="text-[9px] bg-muted">{assignee.initials}</AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        {/* Team Workload */}
+        <Card className="border shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Users className="h-4 w-4" /> Team Workload
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {users.slice(0, 5).map(user => {
+              const count = stats.byAssignee[user.id] || 0;
+              const maxCount = Math.max(...Object.values(stats.byAssignee), 1);
+              return (
+                <div key={user.id} className="flex items-center gap-2.5">
+                  <Avatar className="h-6 w-6 shrink-0">
+                    <AvatarFallback className="text-[10px] bg-muted">{user.initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm truncate">{user.name}</span>
+                      <span className="text-2xs text-muted-foreground">{count} issues</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full mt-1 overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all"
+                        style={{ width: `${(count / maxCount) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sprint Status Distribution */}
+      <Card className="border shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Zap className="h-4 w-4" /> {activeSprint.name} — Status Distribution
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-1 h-8 rounded-md overflow-hidden">
+            {(Object.entries(stats.byStatus) as [Status, number][]).map(([status, count]) => {
+              const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
+              if (pct === 0) return null;
+              return (
+                <div
+                  key={status}
+                  className={`${statusColors[status]} h-full flex items-center justify-center text-primary-foreground text-2xs font-medium transition-all`}
+                  style={{ width: `${pct}%`, minWidth: pct > 0 ? '32px' : '0' }}
+                  title={`${STATUS_LABELS[status]}: ${count}`}
+                >
+                  {count}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-4 mt-3">
+            {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([k, v]) => (
+              <div key={k} className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                <span className={`w-2.5 h-2.5 rounded-sm ${statusColors[k]}`} />
+                {v}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

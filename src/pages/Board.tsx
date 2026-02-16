@@ -5,7 +5,7 @@ import { IssueCard } from '@/components/issues/IssueCard';
 import { IssueDetailDialog } from '@/components/issues/IssueDetailDialog';
 import { Issue, Status, STATUS_LABELS } from '@/types/jira';
 import { cn } from '@/lib/utils';
-import { Filter, MoreHorizontal, User } from 'lucide-react';
+import { Filter, MoreHorizontal, User, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -22,21 +22,26 @@ const columnStyles: Record<Status, string> = {
 };
 
 export default function Board() {
-  const { issues, moveIssue, searchQuery } = useProject();
+  const { issues, moveIssue, searchQuery, sprints, epics } = useProject();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [filterAssignee, setFilterAssignee] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
+  const [filterEpic, setFilterEpic] = useState<string>('all');
+
+  const activeSprint = sprints.find(s => s.status === 'active');
 
   const sprintIssues = useMemo(() => {
-    let filtered = issues.filter(i => i.sprintId === 's1');
+    if (!activeSprint) return [];
+    let filtered = issues.filter(i => i.sprintId === activeSprint.id && !i.parentId);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
     }
     if (filterAssignee !== 'all') filtered = filtered.filter(i => i.assigneeId === filterAssignee);
     if (filterType !== 'all') filtered = filtered.filter(i => i.type === filterType);
+    if (filterEpic !== 'all') filtered = filtered.filter(i => i.epicId === filterEpic);
     return filtered;
-  }, [issues, searchQuery, filterAssignee, filterType]);
+  }, [issues, searchQuery, filterAssignee, filterType, filterEpic, activeSprint]);
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
@@ -46,12 +51,13 @@ export default function Board() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Board Header */}
       <div className="px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-lg font-semibold text-foreground">Board</h1>
-            <p className="text-2xs text-muted-foreground">Sprint 12 · Feb 9 – Feb 23</p>
+            <p className="text-2xs text-muted-foreground">
+              {activeSprint ? `${activeSprint.name} · ${activeSprint.startDate.slice(5)} – ${activeSprint.endDate.slice(5)}` : 'No active sprint'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -75,13 +81,29 @@ export default function Board() {
               <SelectItem value="story">Story</SelectItem>
               <SelectItem value="bug">Bug</SelectItem>
               <SelectItem value="task">Task</SelectItem>
-              <SelectItem value="epic">Epic</SelectItem>
+              <SelectItem value="spike">Spike</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterEpic} onValueChange={setFilterEpic}>
+            <SelectTrigger className="h-7 w-[140px] text-xs">
+              <Zap className="h-3 w-3 mr-1" />
+              <SelectValue placeholder="Epic" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All epics</SelectItem>
+              {epics.map(e => (
+                <SelectItem key={e.id} value={e.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: e.color }} />
+                    {e.name}
+                  </span>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* Board Columns */}
       <div className="flex-1 overflow-x-auto p-6">
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="flex gap-4 min-h-[calc(100vh-220px)]">

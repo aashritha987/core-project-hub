@@ -1,7 +1,9 @@
-export type IssueType = 'story' | 'bug' | 'task' | 'epic' | 'subtask';
+export type IssueType = 'story' | 'bug' | 'task' | 'epic' | 'subtask' | 'spike';
 export type Priority = 'highest' | 'high' | 'medium' | 'low' | 'lowest';
 export type Status = 'todo' | 'in_progress' | 'in_review' | 'done';
 export type SprintStatus = 'active' | 'planned' | 'completed';
+export type UserRole = 'admin' | 'project_manager' | 'developer' | 'viewer';
+export type LinkType = 'blocks' | 'is_blocked_by' | 'relates_to' | 'duplicates' | 'is_duplicated_by';
 
 export interface User {
   id: string;
@@ -9,6 +11,8 @@ export interface User {
   email: string;
   avatar: string;
   initials: string;
+  role: UserRole;
+  password?: string;
 }
 
 export interface Label {
@@ -22,6 +26,17 @@ export interface Comment {
   authorId: string;
   content: string;
   createdAt: string;
+}
+
+export interface IssueLink {
+  id: string;
+  type: LinkType;
+  targetIssueId: string;
+}
+
+export interface TimeTracking {
+  estimatedHours: number | null;
+  loggedHours: number;
 }
 
 export interface Issue {
@@ -42,6 +57,20 @@ export interface Issue {
   comments: Comment[];
   createdAt: string;
   updatedAt: string;
+  dueDate: string | null;
+  timeTracking: TimeTracking;
+  links: IssueLink[];
+  watchers: string[];
+}
+
+export interface Epic {
+  id: string;
+  key: string;
+  name: string;
+  summary: string;
+  color: string;
+  status: 'todo' | 'in_progress' | 'done';
+  projectId: string;
 }
 
 export interface Sprint {
@@ -51,6 +80,7 @@ export interface Sprint {
   status: SprintStatus;
   startDate: string;
   endDate: string;
+  projectId: string;
 }
 
 export interface Project {
@@ -75,6 +105,7 @@ export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   task: 'Task',
   epic: 'Epic',
   subtask: 'Sub-task',
+  spike: 'Spike',
 };
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
@@ -83,4 +114,19 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   medium: 'Medium',
   low: 'Low',
   lowest: 'Lowest',
+};
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Admin',
+  project_manager: 'Project Manager',
+  developer: 'Developer',
+  viewer: 'Viewer',
+};
+
+export const LINK_TYPE_LABELS: Record<LinkType, string> = {
+  blocks: 'blocks',
+  is_blocked_by: 'is blocked by',
+  relates_to: 'relates to',
+  duplicates: 'duplicates',
+  is_duplicated_by: 'is duplicated by',
 };

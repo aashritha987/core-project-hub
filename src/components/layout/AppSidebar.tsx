@@ -1,14 +1,12 @@
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Columns3, List, Settings, Plus, Search, ChevronDown,
-  Zap, BarChart3, Users, Clock, FolderKanban, Bug
+  LayoutDashboard, Columns3, List, Settings, Search, ChevronDown,
+  Zap, BarChart3, Bug, Milestone, FolderKanban
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useProject } from '@/contexts/ProjectContext';
 import { projects } from '@/data/mockData';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -17,14 +15,17 @@ const navItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Board', url: '/board', icon: Columns3 },
   { title: 'Backlog', url: '/backlog', icon: List },
-  { title: 'Timeline', url: '/timeline', icon: BarChart3 },
-  { title: 'Reports', url: '/reports', icon: Zap },
+  { title: 'Sprints', url: '/sprints', icon: Milestone },
+  { title: 'Epics', url: '/epics', icon: Zap },
+  { title: 'Reports', url: '/reports', icon: BarChart3 },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
 export function AppSidebar() {
-  const { currentProject, selectedProjectId, setSelectedProjectId, searchQuery, setSearchQuery } = useProject();
+  const { currentProject, selectedProjectId, setSelectedProjectId, searchQuery, setSearchQuery, sprints } = useProject();
   const navigate = useNavigate();
+  const activeSprint = sprints.find(s => s.status === 'active');
+  const daysLeft = activeSprint ? Math.ceil((new Date(activeSprint.endDate).getTime() - Date.now()) / 86400000) : 0;
 
   return (
     <aside className="w-64 min-w-[256px] border-r border-border bg-sidebar flex flex-col h-screen sticky top-0">
@@ -91,7 +92,7 @@ export function AppSidebar() {
       <div className="p-3 border-t border-border">
         <div className="flex items-center gap-2 text-2xs text-muted-foreground">
           <Bug className="h-3 w-3" />
-          <span>Sprint 12 · 8 days remaining</span>
+          <span>{activeSprint ? `${activeSprint.name} · ${daysLeft > 0 ? `${daysLeft} days remaining` : 'Ending today'}` : 'No active sprint'}</span>
         </div>
       </div>
     </aside>

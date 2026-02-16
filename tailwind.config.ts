@@ -77,6 +77,7 @@ export default {
           bug: "hsl(var(--issue-bug))",
           task: "hsl(var(--issue-task))",
           epic: "hsl(var(--issue-epic))",
+          spike: "hsl(var(--issue-spike))",
         },
         priority: {
           highest: "hsl(var(--priority-highest))",

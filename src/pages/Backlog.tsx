@@ -1,20 +1,22 @@
 import { useState, useMemo } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { IssueCard } from '@/components/issues/IssueCard';
 import { IssueDetailDialog } from '@/components/issues/IssueDetailDialog';
 import { Issue, STATUS_LABELS } from '@/types/jira';
-import { sprints } from '@/data/mockData';
-import { ChevronDown, ChevronRight, GripVertical, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CreateIssueDialog } from '@/components/issues/CreateIssueDialog';
 
 export default function Backlog() {
-  const { issues, searchQuery } = useProject();
+  const { issues, searchQuery, sprints, epics } = useProject();
+  const { canManageSprints } = useAuth();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
-  const [expandedSprints, setExpandedSprints] = useState<Set<string>>(new Set(['s1', 's2', 'backlog']));
+  const [expandedSprints, setExpandedSprints] = useState<Set<string>>(new Set([...sprints.filter(s => s.status !== 'completed').map(s => s.id), 'backlog']));
   const [createOpen, setCreateOpen] = useState(false);
+  const [filterEpic, setFilterEpic] = useState<string>('all');
 
   const toggle = (id: string) => {
     setExpandedSprints(prev => {
@@ -25,19 +27,24 @@ export default function Backlog() {
   };
 
   const filteredIssues = useMemo(() => {
-    if (!searchQuery) return issues;
-    const q = searchQuery.toLowerCase();
-    return issues.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
-  }, [issues, searchQuery]);
+    let result = issues.filter(i => !i.parentId); // exclude subtasks
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
+    }
+    if (filterEpic !== 'all') result = result.filter(i => i.epicId === filterEpic);
+    return result;
+  }, [issues, searchQuery, filterEpic]);
 
   const groupedIssues = useMemo(() => {
-    const groups: { id: string; name: string; issues: Issue[]; meta?: string }[] = [];
-    sprints.forEach(s => {
+    const groups: { id: string; name: string; issues: Issue[]; meta?: string; status?: string }[] = [];
+    sprints.filter(s => s.status !== 'completed').forEach(s => {
       groups.push({
         id: s.id,
         name: s.name,
         issues: filteredIssues.filter(i => i.sprintId === s.id),
-        meta: `${s.startDate.slice(5)} – ${s.endDate.slice(5)} · ${s.status}`,
+        meta: `${s.startDate.slice(5)} – ${s.endDate.slice(5)}`,
+        status: s.status,
       });
     });
     groups.push({
@@ -46,7 +53,7 @@ export default function Backlog() {
       issues: filteredIssues.filter(i => !i.sprintId),
     });
     return groups;
-  }, [filteredIssues]);
+  }, [filteredIssues, sprints]);
 
   const totalPoints = (items: Issue[]) => items.reduce((s, i) => s + (i.storyPoints || 0), 0);
 
@@ -58,9 +65,28 @@ export default function Backlog() {
             <h1 className="text-lg font-semibold text-foreground">Backlog</h1>
             <p className="text-2xs text-muted-foreground">{filteredIssues.length} issues</p>
           </div>
-          <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Create Issue
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={filterEpic} onValueChange={setFilterEpic}>
+              <SelectTrigger className="h-7 w-[140px] text-xs">
+                <Zap className="h-3 w-3 mr-1" />
+                <SelectValue placeholder="Epic" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All epics</SelectItem>
+                {epics.map(e => (
+                  <SelectItem key={e.id} value={e.id}>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: e.color }} />
+                      {e.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Create Issue
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -77,6 +103,7 @@ export default function Backlog() {
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               )}
               <span className="text-sm font-semibold text-foreground">{group.name}</span>
+              {group.status && <Badge variant={group.status === 'active' ? 'default' : 'secondary'} className="text-2xs">{group.status}</Badge>}
               <Badge variant="secondary" className="text-2xs ml-1">{group.issues.length} issues</Badge>
               <Badge variant="outline" className="text-2xs">{totalPoints(group.issues)} pts</Badge>
               {group.meta && (

@@ -2,18 +2,53 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProjectProvider } from "@/contexts/ProjectContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Board from "./pages/Board";
 import Backlog from "./pages/Backlog";
 import Timeline from "./pages/Timeline";
 import Reports from "./pages/Reports";
+import Epics from "./pages/Epics";
+import SprintManagement from "./pages/SprintManagement";
 import ProjectSettings from "./pages/ProjectSettings";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function AuthRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+const AppRoutes = () => (
+  <Routes>
+    <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
+    <Route path="/register" element={<AuthRoute><Register /></AuthRoute>} />
+    <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
+    <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
+    <Route path="/board" element={<ProtectedRoute><AppLayout><Board /></AppLayout></ProtectedRoute>} />
+    <Route path="/backlog" element={<ProtectedRoute><AppLayout><Backlog /></AppLayout></ProtectedRoute>} />
+    <Route path="/timeline" element={<ProtectedRoute><AppLayout><Timeline /></AppLayout></ProtectedRoute>} />
+    <Route path="/reports" element={<ProtectedRoute><AppLayout><Reports /></AppLayout></ProtectedRoute>} />
+    <Route path="/epics" element={<ProtectedRoute><AppLayout><Epics /></AppLayout></ProtectedRoute>} />
+    <Route path="/sprints" element={<ProtectedRoute><AppLayout><SprintManagement /></AppLayout></ProtectedRoute>} />
+    <Route path="/settings" element={<ProtectedRoute><AppLayout><ProjectSettings /></AppLayout></ProtectedRoute>} />
+    <Route path="*" element={<NotFound />} />
+  </Routes>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -21,19 +56,11 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <ProjectProvider>
-          <AppLayout>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/board" element={<Board />} />
-              <Route path="/backlog" element={<Backlog />} />
-              <Route path="/timeline" element={<Timeline />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<ProjectSettings />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </AppLayout>
-        </ProjectProvider>
+        <AuthProvider>
+          <ProjectProvider>
+            <AppRoutes />
+          </ProjectProvider>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

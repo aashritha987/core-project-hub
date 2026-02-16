@@ -1,21 +1,23 @@
 import { useMemo } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
-import { users, sprints } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { users } from '@/data/mockData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { IssueTypeIcon, PriorityIcon } from '@/components/issues/IssueCard';
-import { STATUS_LABELS, Status, IssueType } from '@/types/jira';
-import { BarChart3, CheckCircle2, Clock, AlertTriangle, Users, Zap } from 'lucide-react';
+import { STATUS_LABELS, Status, ROLE_LABELS } from '@/types/jira';
+import { BarChart3, CheckCircle2, Clock, AlertTriangle, Users, Zap, Shield } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const { issues, currentProject } = useProject();
+  const { issues, currentProject, sprints, epics } = useProject();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
 
-  const sprintIssues = issues.filter(i => i.sprintId === 's1');
-  const activeSprint = sprints.find(s => s.id === 's1')!;
+  const activeSprint = sprints.find(s => s.status === 'active');
+  const sprintIssues = activeSprint ? issues.filter(i => i.sprintId === activeSprint.id) : [];
 
   const stats = useMemo(() => {
     const byStatus = { todo: 0, in_progress: 0, in_review: 0, done: 0 };
@@ -25,13 +27,10 @@ export default function Dashboard() {
     const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
     const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
 
-    const byType: Record<string, number> = {};
-    sprintIssues.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
-
     const byAssignee: Record<string, number> = {};
     sprintIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
 
-    return { byStatus, total, donePercent, totalPoints, donePoints, byType, byAssignee };
+    return { byStatus, total, donePercent, totalPoints, donePoints, byAssignee };
   }, [sprintIssues]);
 
   const recentActivity = issues
@@ -47,10 +46,19 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">{currentProject.name}</h1>
-        <p className="text-sm text-muted-foreground">{currentProject.description}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">{currentProject.name}</h1>
+          <p className="text-sm text-muted-foreground">{currentProject.description}</p>
+        </div>
+        {currentUser && (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs gap-1">
+              <Shield className="h-3 w-3" />
+              {ROLE_LABELS[currentUser.role]}
+            </Badge>
+          </div>
+        )}
       </div>
 
       {/* Sprint Stats Cards */}
@@ -104,14 +112,14 @@ export default function Dashboard() {
           <CardContent className="pt-4 pb-4 px-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xs text-muted-foreground font-medium">To Do</p>
-                <p className="text-2xl font-bold text-foreground mt-1">{stats.byStatus.todo}</p>
+                <p className="text-2xs text-muted-foreground font-medium">Epics</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{epics.length}</p>
               </div>
-              <div className="h-10 w-10 rounded-lg bg-jira-yellow-light flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-jira-yellow" />
+              <div className="h-10 w-10 rounded-lg bg-jira-purple-light flex items-center justify-center">
+                <Zap className="h-5 w-5 text-jira-purple" />
               </div>
             </div>
-            <p className="text-2xs text-muted-foreground mt-3">{stats.total} total in sprint</p>
+            <p className="text-2xs text-muted-foreground mt-3">{epics.filter(e => e.status === 'done').length} completed</p>
           </CardContent>
         </Card>
       </div>
@@ -165,10 +173,7 @@ export default function Dashboard() {
                       <span className="text-2xs text-muted-foreground">{count} issues</span>
                     </div>
                     <div className="h-1.5 bg-muted rounded-full mt-1 overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full transition-all"
-                        style={{ width: `${(count / maxCount) * 100}%` }}
-                      />
+                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(count / maxCount) * 100}%` }} />
                     </div>
                   </div>
                 </div>
@@ -179,39 +184,38 @@ export default function Dashboard() {
       </div>
 
       {/* Sprint Status Distribution */}
-      <Card className="border shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Zap className="h-4 w-4" /> {activeSprint.name} — Status Distribution
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-1 h-8 rounded-md overflow-hidden">
-            {(Object.entries(stats.byStatus) as [Status, number][]).map(([status, count]) => {
-              const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
-              if (pct === 0) return null;
-              return (
-                <div
-                  key={status}
-                  className={`${statusColors[status]} h-full flex items-center justify-center text-primary-foreground text-2xs font-medium transition-all`}
-                  style={{ width: `${pct}%`, minWidth: pct > 0 ? '32px' : '0' }}
-                  title={`${STATUS_LABELS[status]}: ${count}`}
-                >
-                  {count}
+      {activeSprint && (
+        <Card className="border shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Zap className="h-4 w-4" /> {activeSprint.name} — Status Distribution
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-1 h-8 rounded-md overflow-hidden">
+              {(Object.entries(stats.byStatus) as [Status, number][]).map(([status, count]) => {
+                const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
+                if (pct === 0) return null;
+                return (
+                  <div key={status} className={`${statusColors[status]} h-full flex items-center justify-center text-primary-foreground text-2xs font-medium transition-all`}
+                    style={{ width: `${pct}%`, minWidth: pct > 0 ? '32px' : '0' }}
+                    title={`${STATUS_LABELS[status]}: ${count}`}>
+                    {count}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 mt-3">
+              {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([k, v]) => (
+                <div key={k} className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                  <span className={`w-2.5 h-2.5 rounded-sm ${statusColors[k]}`} />
+                  {v}
                 </div>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-4 mt-3">
-            {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([k, v]) => (
-              <div key={k} className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-                <span className={`w-2.5 h-2.5 rounded-sm ${statusColors[k]}`} />
-                {v}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

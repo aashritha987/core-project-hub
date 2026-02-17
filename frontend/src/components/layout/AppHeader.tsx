@@ -1,4 +1,4 @@
-import { Bell, HelpCircle, Plus, LogOut, Shield } from 'lucide-react';
+import { Bell, HelpCircle, Plus, LogOut, Shield, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { CreateIssueDialog } from '@/components/issues/CreateIssueDialog';
 import { ROLE_LABELS } from '@/types/jira';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
@@ -16,6 +17,7 @@ import {
 export function AppHeader() {
   const { currentProject } = useProject();
   const { currentUser, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { notifications, unreadCount, markAsRead, markAllAsRead, loading } = useNotifications();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
@@ -83,6 +85,20 @@ export function AppHeader() {
           </DropdownMenu>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/help')}>
             <HelpCircle className="h-4 w-4 text-muted-foreground" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? (
+              <Sun className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <Moon className="h-4 w-4 text-muted-foreground" />
+            )}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

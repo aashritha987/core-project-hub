@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Board from "./pages/Board";
@@ -14,6 +15,8 @@ import Reports from "./pages/Reports";
 import Epics from "./pages/Epics";
 import SprintManagement from "./pages/SprintManagement";
 import ProjectSettings from "./pages/ProjectSettings";
+import UserManagement from "./pages/UserManagement";
+import HelpGuide from "./pages/HelpGuide";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -22,13 +25,15 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isInitializing } = useAuth();
+  if (isInitializing) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
 function AuthRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isInitializing } = useAuth();
+  if (isInitializing) return null;
   if (isAuthenticated) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
@@ -46,6 +51,8 @@ const AppRoutes = () => (
     <Route path="/epics" element={<ProtectedRoute><AppLayout><Epics /></AppLayout></ProtectedRoute>} />
     <Route path="/sprints" element={<ProtectedRoute><AppLayout><SprintManagement /></AppLayout></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><AppLayout><ProjectSettings /></AppLayout></ProtectedRoute>} />
+    <Route path="/users" element={<ProtectedRoute><AppLayout><UserManagement /></AppLayout></ProtectedRoute>} />
+    <Route path="/help" element={<ProtectedRoute><AppLayout><HelpGuide /></AppLayout></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
@@ -58,7 +65,9 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <ProjectProvider>
-            <AppRoutes />
+            <NotificationProvider>
+              <AppRoutes />
+            </NotificationProvider>
           </ProjectProvider>
         </AuthProvider>
       </BrowserRouter>

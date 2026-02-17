@@ -4,6 +4,7 @@ export type Status = 'todo' | 'in_progress' | 'in_review' | 'done';
 export type SprintStatus = 'active' | 'planned' | 'completed';
 export type UserRole = 'admin' | 'project_manager' | 'developer' | 'viewer';
 export type LinkType = 'blocks' | 'is_blocked_by' | 'relates_to' | 'duplicates' | 'is_duplicated_by';
+export type NotificationType = 'info' | 'assignment' | 'comment' | 'status_change' | 'sprint' | 'system';
 
 export interface User {
   id: string;
@@ -12,6 +13,7 @@ export interface User {
   avatar: string;
   initials: string;
   role: UserRole;
+  isActive?: boolean;
   password?: string;
 }
 
@@ -90,6 +92,17 @@ export interface Project {
   description: string;
   leadId: string;
   avatar: string;
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  isRead: boolean;
+  actionUrl: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export const STATUS_LABELS: Record<Status, string> = {

@@ -1,0 +1,76 @@
+from django.urls import path
+from .views import (
+    AuthForgotPasswordView,
+    AuthLoginView,
+    AuthLogoutView,
+    AuthMeView,
+    AuthRegisterView,
+    BurndownReportView,
+    DashboardReportView,
+    EpicDetailView,
+    EpicsView,
+    IssueCommentCreateView,
+    IssueDetailView,
+    IssueLinkCreateView,
+    IssueLinkDeleteView,
+    IssueLogTimeView,
+    IssueMoveView,
+    IssuesView,
+    IssueWatchToggleView,
+    LabelsView,
+    NotificationListView,
+    NotificationMarkReadView,
+    NotificationReadAllView,
+    NotificationUnreadCountView,
+    ProjectDetailView,
+    ProjectListView,
+    SprintCompleteView,
+    SprintDetailView,
+    SprintStartView,
+    SprintsView,
+    UsersListView,
+    UserDetailView,
+    VelocityReportView,
+)
+
+urlpatterns = [
+    path('auth/login/', AuthLoginView.as_view()),
+    path('auth/register/', AuthRegisterView.as_view()),
+    path('auth/forgot-password/', AuthForgotPasswordView.as_view()),
+    path('auth/logout/', AuthLogoutView.as_view()),
+    path('auth/me/', AuthMeView.as_view()),
+
+    path('users/', UsersListView.as_view()),
+    path('users/<str:user_uid>/', UserDetailView.as_view()),
+
+    path('notifications/', NotificationListView.as_view()),
+    path('notifications/unread-count/', NotificationUnreadCountView.as_view()),
+    path('notifications/read-all/', NotificationReadAllView.as_view()),
+    path('notifications/<str:notification_uid>/read/', NotificationMarkReadView.as_view()),
+
+    path('projects/', ProjectListView.as_view()),
+    path('projects/<str:project_uid>/', ProjectDetailView.as_view()),
+
+    path('labels/', LabelsView.as_view()),
+
+    path('epics/', EpicsView.as_view()),
+    path('epics/<str:epic_uid>/', EpicDetailView.as_view()),
+
+    path('sprints/', SprintsView.as_view()),
+    path('sprints/<str:sprint_uid>/', SprintDetailView.as_view()),
+    path('sprints/<str:sprint_uid>/start/', SprintStartView.as_view()),
+    path('sprints/<str:sprint_uid>/complete/', SprintCompleteView.as_view()),
+
+    path('issues/', IssuesView.as_view()),
+    path('issues/<str:issue_uid>/', IssueDetailView.as_view()),
+    path('issues/<str:issue_uid>/move/', IssueMoveView.as_view()),
+    path('issues/<str:issue_uid>/comments/', IssueCommentCreateView.as_view()),
+    path('issues/<str:issue_uid>/log-time/', IssueLogTimeView.as_view()),
+    path('issues/<str:issue_uid>/watch-toggle/', IssueWatchToggleView.as_view()),
+    path('issues/<str:issue_uid>/links/', IssueLinkCreateView.as_view()),
+    path('issues/<str:issue_uid>/links/<str:link_uid>/', IssueLinkDeleteView.as_view()),
+
+    path('reports/dashboard/', DashboardReportView.as_view()),
+    path('reports/burndown/', BurndownReportView.as_view()),
+    path('reports/velocity/', VelocityReportView.as_view()),
+]

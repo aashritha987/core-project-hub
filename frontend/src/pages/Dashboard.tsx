@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { users } from '@/data/mockData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +11,7 @@ import { BarChart3, CheckCircle2, Clock, AlertTriangle, Users, Zap, Shield } fro
 import { useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const { issues, currentProject, sprints, epics } = useProject();
+  const { issues, currentProject, sprints, epics, users } = useProject();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 

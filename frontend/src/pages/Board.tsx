@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { users } from '@/data/mockData';
 
 const columns: Status[] = ['todo', 'in_progress', 'in_review', 'done'];
 
@@ -22,7 +21,7 @@ const columnStyles: Record<Status, string> = {
 };
 
 export default function Board() {
-  const { issues, moveIssue, searchQuery, sprints, epics } = useProject();
+  const { issues, moveIssue, searchQuery, sprints, epics, users } = useProject();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [filterAssignee, setFilterAssignee] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');

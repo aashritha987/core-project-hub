@@ -14,9 +14,9 @@ export default function ForgotPassword() {
   const [message, setMessage] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = forgotPassword(email);
+    const result = await forgotPassword(email);
     setMessage(result.message);
     setIsSuccess(result.success);
   };

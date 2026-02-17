@@ -16,9 +16,9 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Issue, Status, Priority, STATUS_LABELS, PRIORITY_LABELS, ISSUE_TYPE_LABELS, LINK_TYPE_LABELS, LinkType } from '@/types/jira';
 import { IssueTypeIcon, PriorityIcon } from './IssueCard';
-import { users } from '@/data/mockData';
 import { Clock, MessageSquare, Send, Link2, Eye, Calendar, Timer, Plus, Layers, Trash2 } from 'lucide-react';
 import { CreateIssueDialog } from './CreateIssueDialog';
+import { apiRequest } from '@/lib/api';
 
 interface IssueDetailDialogProps {
   issue: Issue | null;
@@ -27,7 +27,7 @@ interface IssueDetailDialogProps {
 }
 
 export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDialogProps) {
-  const { updateIssue, issues, epics, deleteIssue } = useProject();
+  const { updateIssue, issues, epics, deleteIssue, setIssues, users } = useProject();
   const { currentUser, canEditIssue } = useAuth();
   const [newComment, setNewComment] = useState('');
   const [logHours, setLogHours] = useState('');
@@ -52,47 +52,54 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
     done: 'bg-status-done text-primary-foreground',
   };
 
-  const addComment = () => {
+  const syncUpdatedIssue = (updatedIssue: Issue) => {
+    setIssues(prev => prev.map(i => i.id === updatedIssue.id ? updatedIssue : i));
+  };
+
+  const addComment = async () => {
     if (!newComment.trim() || !currentUser) return;
-    const comment = {
-      id: `c-${Date.now()}`,
-      authorId: currentUser.id,
-      content: newComment.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    updateIssue(issue.id, { comments: [...issue.comments, comment] });
+    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/comments/`, {
+      method: 'POST',
+      body: { content: newComment.trim() },
+    });
+    syncUpdatedIssue(updatedIssue);
     setNewComment('');
   };
 
-  const handleLogTime = () => {
+  const handleLogTime = async () => {
     if (!logHours) return;
     const hours = parseFloat(logHours);
     if (isNaN(hours) || hours <= 0) return;
-    updateIssue(issue.id, {
-      timeTracking: { ...issue.timeTracking, loggedHours: issue.timeTracking.loggedHours + hours },
+    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/log-time/`, {
+      method: 'POST',
+      body: { hours },
     });
+    syncUpdatedIssue(updatedIssue);
     setLogHours('');
   };
 
-  const toggleWatcher = () => {
-    if (!currentUser) return;
-    const watchers = issue.watchers.includes(currentUser.id)
-      ? issue.watchers.filter(w => w !== currentUser.id)
-      : [...issue.watchers, currentUser.id];
-    updateIssue(issue.id, { watchers });
+  const toggleWatcher = async () => {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/watch-toggle/`, {
+      method: 'POST',
+    });
+    syncUpdatedIssue(updatedIssue);
   };
 
-  const addLink = () => {
-    const target = issues.find(i => i.key === linkTargetKey.toUpperCase());
-    if (!target) return;
-    const newLink = { id: `lk-${Date.now()}`, type: linkType, targetIssueId: target.id };
-    updateIssue(issue.id, { links: [...issue.links, newLink] });
+  const addLink = async () => {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/links/`, {
+      method: 'POST',
+      body: { type: linkType, targetKey: linkTargetKey.toUpperCase() },
+    });
+    syncUpdatedIssue(updatedIssue);
     setLinkTargetKey('');
     setAddLinkOpen(false);
   };
 
-  const removeLink = (linkId: string) => {
-    updateIssue(issue.id, { links: issue.links.filter(l => l.id !== linkId) });
+  const removeLink = async (linkId: string) => {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/links/${linkId}/`, {
+      method: 'DELETE',
+    });
+    syncUpdatedIssue(updatedIssue);
   };
 
   const isWatching = currentUser ? issue.watchers.includes(currentUser.id) : false;

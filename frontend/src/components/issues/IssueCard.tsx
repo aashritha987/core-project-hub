@@ -1,5 +1,5 @@
 import { Issue, IssueType, Priority } from '@/types/jira';
-import { users } from '@/data/mockData';
+import { useProject } from '@/contexts/ProjectContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bug, BookOpen, CheckSquare, Zap, Layers, ArrowUp, ArrowDown, Minus, FlaskConical, Calendar, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -47,6 +47,7 @@ interface IssueCardProps {
 }
 
 export function IssueCard({ issue, onClick, compact }: IssueCardProps) {
+  const { users } = useProject();
   const assignee = issue.assigneeId ? users.find(u => u.id === issue.assigneeId) : null;
   const isOverdue = issue.dueDate && new Date(issue.dueDate) < new Date() && issue.status !== 'done';
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -12,7 +12,6 @@ import {
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Issue, IssueType, Priority, Status } from '@/types/jira';
-import { users } from '@/data/mockData';
 
 interface CreateIssueDialogProps {
   open: boolean;
@@ -23,20 +22,28 @@ interface CreateIssueDialogProps {
 }
 
 export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintId, defaultEpicId }: CreateIssueDialogProps) {
-  const { currentProject, addIssue, issues, sprints, epics } = useProject();
+  const { currentProject, addIssue, issues, sprints, epics, users } = useProject();
   const { currentUser } = useAuth();
+  const NONE = '__none__';
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<IssueType>(parentId ? 'subtask' : 'task');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [assigneeId, setAssigneeId] = useState<string>('');
+  const [assigneeId, setAssigneeId] = useState<string>(NONE);
   const [storyPoints, setStoryPoints] = useState('');
-  const [sprintId, setSprintId] = useState(defaultSprintId || '');
-  const [epicId, setEpicId] = useState(defaultEpicId || '');
+  const [sprintId, setSprintId] = useState(defaultSprintId || NONE);
+  const [epicId, setEpicId] = useState(defaultEpicId || NONE);
   const [dueDate, setDueDate] = useState('');
   const [estimatedHours, setEstimatedHours] = useState('');
 
-  const handleSubmit = () => {
+  useEffect(() => {
+    if (!open) return;
+    setSprintId(defaultSprintId || NONE);
+    setEpicId(defaultEpicId || NONE);
+    setType(parentId ? 'subtask' : 'task');
+  }, [open, defaultSprintId, defaultEpicId, parentId]);
+
+  const handleSubmit = async () => {
     if (!title.trim()) return;
     const num = issues.filter(i => i.key.startsWith(currentProject.key)).length + 1;
     const newIssue: Issue = {
@@ -47,12 +54,12 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
       type,
       status: 'todo' as Status,
       priority,
-      assigneeId: assigneeId || null,
+      assigneeId: assigneeId === NONE ? null : assigneeId,
       reporterId: currentUser?.id || 'u1',
       labels: [],
       storyPoints: storyPoints ? parseInt(storyPoints) : null,
-      sprintId: sprintId || null,
-      epicId: epicId || null,
+      sprintId: sprintId === NONE ? null : sprintId,
+      epicId: epicId === NONE ? null : epicId,
       parentId: parentId || null,
       comments: [],
       createdAt: new Date().toISOString(),
@@ -62,10 +69,10 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
       links: [],
       watchers: currentUser ? [currentUser.id] : [],
     };
-    addIssue(newIssue);
+    await addIssue(newIssue);
     onOpenChange(false);
     setTitle(''); setDescription(''); setType(parentId ? 'subtask' : 'task'); setPriority('medium');
-    setAssigneeId(''); setStoryPoints(''); setSprintId(''); setEpicId(''); setDueDate(''); setEstimatedHours('');
+    setAssigneeId(NONE); setStoryPoints(''); setSprintId(NONE); setEpicId(NONE); setDueDate(''); setEstimatedHours('');
   };
 
   const activeSprints = sprints.filter(s => s.status !== 'completed');
@@ -119,6 +126,7 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
               <Select value={assigneeId} onValueChange={setAssigneeId}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE}>Unassigned</SelectItem>
                   {users.map(u => (
                     <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                   ))}
@@ -136,7 +144,7 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
               <Select value={sprintId} onValueChange={setSprintId}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Backlog" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Backlog</SelectItem>
+                  <SelectItem value={NONE}>Backlog</SelectItem>
                   {activeSprints.map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
@@ -148,7 +156,7 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
               <Select value={epicId} onValueChange={setEpicId}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="None" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value={NONE}>None</SelectItem>
                   {epics.map(e => (
                     <SelectItem key={e.id} value={e.id}>
                       <span className="flex items-center gap-1.5">

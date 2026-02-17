@@ -1,24 +1,50 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { sprintBurndownData, velocityData } from '@/data/mockData';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { TrendingDown, Zap, BarChart3 } from 'lucide-react';
+import { TrendingDown, Zap } from 'lucide-react';
+import { apiRequest } from '@/lib/api';
+
+type BurndownPoint = { date: string; remaining: number; ideal: number };
+type VelocityPoint = { sprint: string; committed: number; completed: number };
 
 export default function Reports() {
-  const { issues, sprints } = useProject();
+  const { issues, sprints, currentProject, refreshReportsToken } = useProject();
+  const [sprintBurndownData, setSprintBurndownData] = useState<BurndownPoint[]>([]);
+  const [velocityData, setVelocityData] = useState<VelocityPoint[]>([]);
 
   const activeSprint = sprints.find(s => s.status === 'active');
   const sprintIssues = activeSprint ? issues.filter(i => i.sprintId === activeSprint.id) : [];
   const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
   const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
 
+  useEffect(() => {
+    if (!currentProject?.id) return;
+
+    const load = async () => {
+      try {
+        const velocity = await apiRequest<VelocityPoint[]>(`/reports/velocity/?project_id=${currentProject.id}`);
+        setVelocityData(velocity);
+        if (activeSprint?.id) {
+          const burndown = await apiRequest<BurndownPoint[]>(`/reports/burndown/?sprint_id=${activeSprint.id}`);
+          setSprintBurndownData(burndown);
+        } else {
+          setSprintBurndownData([]);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    load();
+  }, [currentProject.id, activeSprint?.id, refreshReportsToken]);
+
   const avgVelocity = useMemo(() => {
     const completed = velocityData.slice(0, -1);
     if (completed.length === 0) return 0;
     return Math.round(completed.reduce((s, d) => s + d.completed, 0) / completed.length);
-  }, []);
+  }, [velocityData]);
 
   return (
     <div className="p-6 space-y-4 max-w-6xl">
@@ -39,7 +65,7 @@ export default function Reports() {
           <CardContent className="pt-4 pb-4 px-4">
             <p className="text-2xs text-muted-foreground font-medium">Avg Velocity</p>
             <p className="text-2xl font-bold mt-1">{avgVelocity} pts</p>
-            <p className="text-2xs text-muted-foreground mt-1">Last {velocityData.length - 1} sprints</p>
+            <p className="text-2xs text-muted-foreground mt-1">Last {Math.max(velocityData.length - 1, 0)} sprints</p>
           </CardContent>
         </Card>
         <Card className="border shadow-sm">
@@ -65,7 +91,7 @@ export default function Reports() {
           <Card className="border shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Sprint Burndown Chart</CardTitle>
-              <p className="text-2xs text-muted-foreground">{activeSprint?.name} â€” Story points remaining over time</p>
+              <p className="text-2xs text-muted-foreground">{activeSprint?.name} — Story points remaining over time</p>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={320}>

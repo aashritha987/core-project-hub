@@ -1,14 +1,15 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { User, UserRole } from '@/types/jira';
-import { users } from '@/data/mockData';
+import { apiRequest, getToken, setToken } from '@/lib/api';
 
 interface AuthContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => { success: boolean; error?: string };
-  register: (name: string, email: string, password: string) => { success: boolean; error?: string };
-  logout: () => void;
-  forgotPassword: (email: string) => { success: boolean; message: string };
+  isInitializing: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  forgotPassword: (email: string) => Promise<{ success: boolean; message: string }>;
   hasRole: (roles: UserRole[]) => boolean;
   canEditIssue: (assigneeId: string | null, reporterId: string) => boolean;
   canManageProject: () => boolean;
@@ -23,53 +24,107 @@ export const useAuth = () => {
   return ctx;
 };
 
+const USER_KEY = 'jira_current_user';
+
+type AuthResponse = {
+  success: boolean;
+  token: string;
+  user: User;
+  error?: string;
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('jira_current_user');
+    const saved = localStorage.getItem(USER_KEY);
     if (saved) {
-      try { return JSON.parse(saved); } catch { return null; }
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return null;
+      }
     }
     return null;
   });
+  const [isInitializing, setIsInitializing] = useState(true);
 
-  const login = useCallback((email: string, password: string) => {
-    const user = users.find(u => u.email === email && u.password === password);
-    if (user) {
-      const { password: _, ...safeUser } = user;
-      setCurrentUser(safeUser as User);
-      localStorage.setItem('jira_current_user', JSON.stringify(safeUser));
-      return { success: true };
-    }
-    return { success: false, error: 'Invalid email or password' };
-  }, []);
+  useEffect(() => {
+    const bootstrap = async () => {
+      const token = getToken();
+      if (!token) {
+        setIsInitializing(false);
+        return;
+      }
 
-  const register = useCallback((name: string, email: string, password: string) => {
-    if (users.find(u => u.email === email)) {
-      return { success: false, error: 'Email already exists' };
-    }
-    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-    const newUser: User = {
-      id: `u-${Date.now()}`,
-      name, email, avatar: '', initials,
-      role: 'developer',
+      try {
+        const user = await apiRequest<User>('/auth/me/');
+        setCurrentUser(user);
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+      } catch {
+        setToken(null);
+        setCurrentUser(null);
+        localStorage.removeItem(USER_KEY);
+      } finally {
+        setIsInitializing(false);
+      }
     };
-    users.push({ ...newUser, password });
-    setCurrentUser(newUser);
-    localStorage.setItem('jira_current_user', JSON.stringify(newUser));
-    return { success: true };
+
+    bootstrap();
   }, []);
 
-  const logout = useCallback(() => {
-    setCurrentUser(null);
-    localStorage.removeItem('jira_current_user');
-  }, []);
-
-  const forgotPassword = useCallback((email: string) => {
-    const user = users.find(u => u.email === email);
-    if (user) {
-      return { success: true, message: 'Password reset link sent to your email (demo: check console)' };
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const resp = await apiRequest<AuthResponse>('/auth/login/', {
+        method: 'POST',
+        body: { email, password },
+        auth: false,
+      });
+      setToken(resp.token);
+      setCurrentUser(resp.user);
+      localStorage.setItem(USER_KEY, JSON.stringify(resp.user));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Invalid email or password' };
     }
-    return { success: false, message: 'No account found with that email' };
+  }, []);
+
+  const register = useCallback(async (name: string, email: string, password: string) => {
+    try {
+      const resp = await apiRequest<AuthResponse>('/auth/register/', {
+        method: 'POST',
+        body: { name, email, password },
+        auth: false,
+      });
+      setToken(resp.token);
+      setCurrentUser(resp.user);
+      localStorage.setItem(USER_KEY, JSON.stringify(resp.user));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Registration failed' };
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await apiRequest('/auth/logout/', { method: 'POST' });
+    } catch {
+      // Ignore logout request failures and clear client auth anyway.
+    }
+    setCurrentUser(null);
+    setToken(null);
+    localStorage.removeItem(USER_KEY);
+  }, []);
+
+  const forgotPassword = useCallback(async (email: string) => {
+    try {
+      const result = await apiRequest<{ success: boolean; message: string }>('/auth/forgot-password/', {
+        method: 'POST',
+        body: { email },
+        auth: false,
+      });
+      return result;
+    } catch (err) {
+      return { success: false, message: err instanceof Error ? err.message : 'Request failed' };
+    }
   }, []);
 
   const hasRole = useCallback((roles: UserRole[]) => {
@@ -86,21 +141,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return false;
   }, [currentUser]);
 
-  const canManageProject = useCallback(() => {
-    return hasRole(['admin']);
-  }, [hasRole]);
-
-  const canManageSprints = useCallback(() => {
-    return hasRole(['admin', 'project_manager']);
-  }, [hasRole]);
+  const canManageProject = useCallback(() => hasRole(['admin']), [hasRole]);
+  const canManageSprints = useCallback(() => hasRole(['admin', 'project_manager']), [hasRole]);
 
   return (
-    <AuthContext.Provider value={{
-      currentUser,
-      isAuthenticated: !!currentUser,
-      login, register, logout, forgotPassword,
-      hasRole, canEditIssue, canManageProject, canManageSprints,
-    }}>
+    <AuthContext.Provider
+      value={{
+        currentUser,
+        isAuthenticated: !!currentUser,
+        isInitializing,
+        login,
+        register,
+        logout,
+        forgotPassword,
+        hasRole,
+        canEditIssue,
+        canManageProject,
+        canManageSprints,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

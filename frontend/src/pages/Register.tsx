@@ -17,7 +17,7 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (password !== confirmPassword) {
@@ -28,7 +28,7 @@ export default function Register() {
       setError('Password must be at least 6 characters');
       return;
     }
-    const result = register(name, email, password);
+    const result = await register(name, email, password);
     if (result.success) {
       navigate('/');
     } else {

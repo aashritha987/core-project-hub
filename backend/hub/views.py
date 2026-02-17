@@ -9,11 +9,12 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Epic, Issue, IssueComment, IssueLink, Label, Notification, Project, Sprint
+from .models import Epic, Issue, IssueAttachment, IssueComment, IssueLink, Label, Notification, Project, Sprint
 from .permissions import can_edit_issue, can_manage_project, can_manage_sprints
 from .serializers import (
     EpicSerializer,
@@ -98,6 +99,10 @@ def _project_participants(project: Project):
     user_ids.update(Issue.objects.filter(project=project).exclude(assignee=None).values_list('assignee_id', flat=True))
     user_ids.update(Issue.objects.filter(project=project).values_list('reporter_id', flat=True))
     return User.objects.filter(id__in=user_ids)
+
+
+def _issue_response(issue: Issue, request):
+    return IssueSerializer(issue, context={'request': request}).data
 
 
 def _apply_issue_payload(issue: Issue, payload: dict, request_user):
@@ -534,7 +539,7 @@ class IssuesView(APIView):
             qs = qs.filter(parent__isnull=True)
 
         issues = qs.order_by('-updated_at')
-        return Response(IssueSerializer(issues, many=True).data)
+        return Response(IssueSerializer(issues, many=True, context={'request': request}).data)
 
     @transaction.atomic
     def post(self, request):
@@ -567,7 +572,7 @@ class IssuesView(APIView):
             action_url='/backlog',
             metadata={'issueId': issue.uid, 'issueKey': issue.key},
         )
-        return Response(IssueSerializer(issue).data, status=status.HTTP_201_CREATED)
+        return Response(_issue_response(issue, request), status=status.HTTP_201_CREATED)
 
 
 class IssueDetailView(APIView):
@@ -600,7 +605,7 @@ class IssueDetailView(APIView):
                 action_url='/board',
                 metadata={'issueId': issue.uid, 'issueKey': issue.key},
             )
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
     def delete(self, request, issue_uid):
         issue = _issue_by_uid(issue_uid)
@@ -624,7 +629,7 @@ class IssueMoveView(APIView):
             return Response({'detail': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
         issue.status = new_status
         issue.save(update_fields=['status', 'updated_at'])
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueCommentCreateView(APIView):
@@ -649,7 +654,7 @@ class IssueCommentCreateView(APIView):
             action_url='/board',
             metadata={'issueId': issue.uid, 'issueKey': issue.key},
         )
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueLogTimeView(APIView):
@@ -667,7 +672,7 @@ class IssueLogTimeView(APIView):
             return Response({'detail': 'hours must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
         issue.logged_hours += hours
         issue.save(update_fields=['logged_hours', 'updated_at'])
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueWatchToggleView(APIView):
@@ -679,7 +684,7 @@ class IssueWatchToggleView(APIView):
             issue.watchers.remove(request.user)
         else:
             issue.watchers.add(request.user)
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueLinkCreateView(APIView):
@@ -697,7 +702,7 @@ class IssueLinkCreateView(APIView):
         if link_type not in [c[0] for c in IssueLink.TYPE_CHOICES]:
             return Response({'detail': 'Invalid link type'}, status=status.HTTP_400_BAD_REQUEST)
         IssueLink.objects.get_or_create(issue=issue, target_issue=target_issue, link_type=link_type)
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueLinkDeleteView(APIView):
@@ -708,7 +713,44 @@ class IssueLinkDeleteView(APIView):
         if not can_edit_issue(request.user, issue):
             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         IssueLink.objects.filter(issue=issue, uid=link_uid).delete()
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
+
+
+class IssueAttachmentUploadView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, issue_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not can_edit_issue(request.user, issue):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        incoming = request.FILES.get('file')
+        if not incoming:
+            return Response({'detail': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        IssueAttachment.objects.create(
+            issue=issue,
+            uploaded_by=request.user,
+            file=incoming,
+            original_name=incoming.name,
+            size=incoming.size,
+        )
+        return Response(_issue_response(issue, request), status=status.HTTP_201_CREATED)
+
+
+class IssueAttachmentDeleteView(APIView):
+    def delete(self, request, issue_uid, attachment_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if not can_edit_issue(request.user, issue):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        attachment = IssueAttachment.objects.filter(issue=issue, uid=attachment_uid).first()
+        if attachment:
+            attachment.file.delete(save=False)
+            attachment.delete()
+        return Response(_issue_response(issue, request))
 
 
 class DashboardReportView(APIView):
@@ -745,7 +787,7 @@ class DashboardReportView(APIView):
                 'donePoints': done_points,
                 'byAssignee': by_assignee,
             },
-            'recentActivity': IssueSerializer(recent_issues, many=True).data,
+            'recentActivity': IssueSerializer(recent_issues, many=True, context={'request': request}).data,
         })
 
 

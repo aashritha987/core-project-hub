@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -14,17 +13,28 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Issue, Status, Priority, STATUS_LABELS, PRIORITY_LABELS, ISSUE_TYPE_LABELS, LINK_TYPE_LABELS, LinkType } from '@/types/jira';
+import { Issue, Status, Priority, STATUS_LABELS, PRIORITY_LABELS, LINK_TYPE_LABELS, LinkType } from '@/types/jira';
 import { IssueTypeIcon, PriorityIcon } from './IssueCard';
-import { Clock, MessageSquare, Send, Link2, Eye, Calendar, Timer, Plus, Layers, Trash2 } from 'lucide-react';
+import { Clock, MessageSquare, Send, Link2, Eye, Calendar, Timer, Plus, Layers, Trash2, Paperclip, Download } from 'lucide-react';
 import { CreateIssueDialog } from './CreateIssueDialog';
-import { apiRequest } from '@/lib/api';
+import { apiRequest, API_BASE, getToken } from '@/lib/api';
 
 interface IssueDetailDialogProps {
   issue: Issue | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
+
+type IssueDraft = {
+  status: Status;
+  priority: Priority;
+  assigneeId: string | null;
+  storyPoints: number | null;
+  dueDate: string | null;
+  estimatedHours: number | null;
+};
+
+const NONE = '__none__';
 
 export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDialogProps) {
   const { updateIssue, issues, epics, deleteIssue, setIssues, users } = useProject();
@@ -35,15 +45,40 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
   const [addLinkOpen, setAddLinkOpen] = useState(false);
   const [linkType, setLinkType] = useState<LinkType>('relates_to');
   const [linkTargetKey, setLinkTargetKey] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [pendingComments, setPendingComments] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
-  if (!issue) return null;
+  const liveIssue = useMemo(() => {
+    if (!issue) return null;
+    return issues.find(i => i.id === issue.id) || issue;
+  }, [issue, issues]);
 
-  const canEdit = canEditIssue(issue.assigneeId, issue.reporterId);
-  const assignee = issue.assigneeId ? users.find(u => u.id === issue.assigneeId) : null;
-  const reporter = users.find(u => u.id === issue.reporterId);
-  const epic = issue.epicId ? epics.find(e => e.id === issue.epicId) : null;
-  const subtasks = issues.filter(i => i.parentId === issue.id);
-  const linkedIssues = issue.links.map(l => ({ ...l, issue: issues.find(i => i.id === l.targetIssueId) })).filter(l => l.issue);
+  const [draft, setDraft] = useState<IssueDraft | null>(null);
+
+  useEffect(() => {
+    if (!liveIssue || !open) return;
+    setDraft({
+      status: liveIssue.status,
+      priority: liveIssue.priority,
+      assigneeId: liveIssue.assigneeId,
+      storyPoints: liveIssue.storyPoints,
+      dueDate: liveIssue.dueDate,
+      estimatedHours: liveIssue.timeTracking.estimatedHours,
+    });
+    setPendingComments([]);
+    setPendingFiles([]);
+    setNewComment('');
+  }, [liveIssue?.id, liveIssue?.updatedAt, open]);
+
+  if (!liveIssue || !draft) return null;
+
+  const canEdit = canEditIssue(liveIssue.assigneeId, liveIssue.reporterId);
+  const reporter = users.find(u => u.id === liveIssue.reporterId);
+  const epic = liveIssue.epicId ? epics.find(e => e.id === liveIssue.epicId) : null;
+  const subtasks = issues.filter(i => i.parentId === liveIssue.id);
+  const linkedIssues = liveIssue.links.map(l => ({ ...l, issue: issues.find(i => i.id === l.targetIssueId) })).filter(l => l.issue);
 
   const statusColors: Record<Status, string> = {
     todo: 'bg-status-todo text-foreground',
@@ -56,13 +91,83 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
     setIssues(prev => prev.map(i => i.id === updatedIssue.id ? updatedIssue : i));
   };
 
-  const addComment = async () => {
-    if (!newComment.trim() || !currentUser) return;
-    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/comments/`, {
-      method: 'POST',
-      body: { content: newComment.trim() },
+  const hasFieldChanges =
+    draft.status !== liveIssue.status ||
+    draft.priority !== liveIssue.priority ||
+    draft.assigneeId !== liveIssue.assigneeId ||
+    draft.storyPoints !== liveIssue.storyPoints ||
+    draft.dueDate !== liveIssue.dueDate ||
+    draft.estimatedHours !== liveIssue.timeTracking.estimatedHours;
+
+  const hasDraftChanges = hasFieldChanges || pendingComments.length > 0 || pendingFiles.length > 0;
+
+  const saveDraft = async () => {
+    if (!canEdit || !hasDraftChanges) return;
+    setSavingDraft(true);
+    try {
+      if (hasFieldChanges) {
+        await updateIssue(liveIssue.id, {
+          status: draft.status,
+          priority: draft.priority,
+          assigneeId: draft.assigneeId,
+          storyPoints: draft.storyPoints,
+          dueDate: draft.dueDate,
+          timeTracking: {
+            ...liveIssue.timeTracking,
+            estimatedHours: draft.estimatedHours,
+          },
+        });
+      }
+
+      for (const comment of pendingComments) {
+        const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/comments/`, {
+          method: 'POST',
+          body: { content: comment },
+        });
+        syncUpdatedIssue(updatedIssue);
+      }
+
+      if (pendingFiles.length > 0) {
+        const token = getToken();
+        for (const file of pendingFiles) {
+          const formData = new FormData();
+          formData.append('file', file);
+          const resp = await fetch(`${API_BASE}/issues/${liveIssue.id}/attachments/`, {
+            method: 'POST',
+            headers: token ? { Authorization: `Token ${token}` } : undefined,
+            body: formData,
+          });
+          if (!resp.ok) throw new Error('Attachment upload failed');
+          const updatedIssue = await resp.json();
+          syncUpdatedIssue(updatedIssue);
+        }
+      }
+
+      setPendingComments([]);
+      setPendingFiles([]);
+      setNewComment('');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const resetDraft = () => {
+    setDraft({
+      status: liveIssue.status,
+      priority: liveIssue.priority,
+      assigneeId: liveIssue.assigneeId,
+      storyPoints: liveIssue.storyPoints,
+      dueDate: liveIssue.dueDate,
+      estimatedHours: liveIssue.timeTracking.estimatedHours,
     });
-    syncUpdatedIssue(updatedIssue);
+    setPendingComments([]);
+    setPendingFiles([]);
+    setNewComment('');
+  };
+
+  const addCommentToDraft = () => {
+    if (!newComment.trim()) return;
+    setPendingComments(prev => [...prev, newComment.trim()]);
     setNewComment('');
   };
 
@@ -70,7 +175,7 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
     if (!logHours) return;
     const hours = parseFloat(logHours);
     if (isNaN(hours) || hours <= 0) return;
-    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/log-time/`, {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/log-time/`, {
       method: 'POST',
       body: { hours },
     });
@@ -79,14 +184,14 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
   };
 
   const toggleWatcher = async () => {
-    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/watch-toggle/`, {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/watch-toggle/`, {
       method: 'POST',
     });
     syncUpdatedIssue(updatedIssue);
   };
 
   const addLink = async () => {
-    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/links/`, {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/links/`, {
       method: 'POST',
       body: { type: linkType, targetKey: linkTargetKey.toUpperCase() },
     });
@@ -96,15 +201,28 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
   };
 
   const removeLink = async (linkId: string) => {
-    const updatedIssue = await apiRequest<Issue>(`/issues/${issue.id}/links/${linkId}/`, {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/links/${linkId}/`, {
       method: 'DELETE',
     });
     syncUpdatedIssue(updatedIssue);
   };
 
-  const isWatching = currentUser ? issue.watchers.includes(currentUser.id) : false;
+  const queueAttachment = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    setPendingFiles(prev => [...prev, file]);
+    setUploading(false);
+  };
 
-  // Simple markdown: bold, headers, lists
+  const removeAttachment = async (attachmentId: string) => {
+    const updatedIssue = await apiRequest<Issue>(`/issues/${liveIssue.id}/attachments/${attachmentId}/`, {
+      method: 'DELETE',
+    });
+    syncUpdatedIssue(updatedIssue);
+  };
+
+  const isWatching = currentUser ? liveIssue.watchers.includes(currentUser.id) : false;
+
   const renderDescription = (text: string) => {
     return text.split('\n').map((line, i) => {
       if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold mt-3 mb-1">{line.slice(3)}</h3>;
@@ -113,62 +231,50 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
       if (line.startsWith('- [x] ')) return <div key={i} className="flex items-center gap-2 text-sm"><input type="checkbox" checked disabled className="rounded" /><span className="line-through text-muted-foreground">{line.slice(6)}</span></div>;
       if (line.startsWith('- ')) return <li key={i} className="text-sm ml-4 list-disc">{line.slice(2)}</li>;
       if (line === '') return <br key={i} />;
-      return <p key={i} className="text-sm leading-relaxed">{line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</p>;
+      return <p key={i} className="text-sm leading-relaxed">{line}</p>;
     });
   };
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[860px] max-h-[85vh] overflow-y-auto jira-scrollbar">
+        <DialogContent className="sm:max-w-[900px] max-h-[88vh] overflow-y-auto jira-scrollbar">
           <DialogHeader>
             <div className="flex items-center gap-2 text-sm">
-              <IssueTypeIcon type={issue.type} />
-              <span className="text-muted-foreground font-medium">{issue.key}</span>
+              <IssueTypeIcon type={liveIssue.type} />
+              <span className="text-muted-foreground font-medium">{liveIssue.key}</span>
               {epic && (
                 <Badge variant="outline" className="text-2xs" style={{ borderColor: epic.color, color: epic.color }}>
                   {epic.name}
                 </Badge>
               )}
-              {issue.parentId && (
-                <span className="text-2xs text-muted-foreground">
-                  ↳ Sub-task of {issues.find(i => i.id === issue.parentId)?.key}
-                </span>
-              )}
             </div>
-            <DialogTitle className="text-xl font-semibold mt-1">{issue.title}</DialogTitle>
+            <DialogTitle className="text-xl font-semibold mt-1">{liveIssue.title}</DialogTitle>
             <div className="flex items-center gap-2 mt-2">
               <Button variant={isWatching ? 'secondary' : 'outline'} size="sm" className="h-7 text-xs gap-1" onClick={toggleWatcher}>
-                <Eye className="h-3 w-3" /> {isWatching ? 'Watching' : 'Watch'} ({issue.watchers.length})
+                <Eye className="h-3 w-3" /> {isWatching ? 'Watching' : 'Watch'} ({liveIssue.watchers.length})
               </Button>
             </div>
           </DialogHeader>
 
-          <div className="grid grid-cols-[1fr_240px] gap-6 mt-4">
-            {/* Main Content */}
+          <div className="grid grid-cols-[1fr_260px] gap-6 mt-4">
             <div className="space-y-5">
               <div>
                 <Label className="text-xs text-muted-foreground mb-2 block font-semibold uppercase tracking-wider">Description</Label>
                 <div className="text-foreground">
-                  {issue.description ? renderDescription(issue.description) : <p className="text-sm text-muted-foreground italic">No description provided.</p>}
+                  {liveIssue.description ? renderDescription(liveIssue.description) : <p className="text-sm text-muted-foreground italic">No description provided.</p>}
                 </div>
               </div>
 
-              {/* Subtasks */}
               {(subtasks.length > 0 || canEdit) && (
                 <>
                   <Separator />
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
-                        <Layers className="h-3.5 w-3.5 inline mr-1" />
-                        Sub-tasks ({subtasks.length})
+                        <Layers className="h-3.5 w-3.5 inline mr-1" /> Sub-tasks ({subtasks.length})
                       </Label>
-                      {canEdit && (
-                        <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setCreateSubtaskOpen(true)}>
-                          <Plus className="h-3 w-3" /> Add
-                        </Button>
-                      )}
+                      {canEdit && <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setCreateSubtaskOpen(true)}><Plus className="h-3 w-3" /> Add</Button>}
                     </div>
                     <div className="space-y-1">
                       {subtasks.map(st => (
@@ -184,21 +290,15 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
                 </>
               )}
 
-              {/* Links */}
               {(linkedIssues.length > 0 || canEdit) && (
                 <>
                   <Separator />
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
-                        <Link2 className="h-3.5 w-3.5 inline mr-1" />
-                        Issue Links ({linkedIssues.length})
+                        <Link2 className="h-3.5 w-3.5 inline mr-1" /> Issue Links ({linkedIssues.length})
                       </Label>
-                      {canEdit && (
-                        <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setAddLinkOpen(!addLinkOpen)}>
-                          <Plus className="h-3 w-3" /> Link
-                        </Button>
-                      )}
+                      {canEdit && <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setAddLinkOpen(!addLinkOpen)}><Plus className="h-3 w-3" /> Link</Button>}
                     </div>
                     {addLinkOpen && (
                       <div className="flex items-center gap-2 mb-2 p-2 bg-muted/50 rounded-md">
@@ -222,11 +322,7 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
                           <span className="text-2xs text-muted-foreground">{l.issue!.key}</span>
                           <span className="flex-1 truncate">{l.issue!.title}</span>
                           <Badge variant="outline" className="text-2xs">{STATUS_LABELS[l.issue!.status]}</Badge>
-                          {canEdit && (
-                            <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => removeLink(l.id)}>
-                              <Trash2 className="h-3 w-3 text-destructive" />
-                            </Button>
-                          )}
+                          {canEdit && <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => removeLink(l.id)}><Trash2 className="h-3 w-3 text-destructive" /></Button>}
                         </div>
                       ))}
                     </div>
@@ -236,20 +332,64 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
 
               <Separator />
 
-              {/* Comments */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
+                    <Paperclip className="h-3.5 w-3.5 inline mr-1" /> Attachments ({(liveIssue.attachments?.length || 0) + pendingFiles.length})
+                  </Label>
+                  {canEdit && (
+                    <label className="inline-flex items-center gap-1 text-xs cursor-pointer text-primary hover:underline">
+                      <Plus className="h-3 w-3" /> Upload
+                      <input type="file" className="hidden" disabled={uploading} onChange={e => queueAttachment(e.target.files?.[0] || null)} />
+                    </label>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {(liveIssue.attachments || []).length === 0 && pendingFiles.length === 0 && <p className="text-sm text-muted-foreground">No attachments uploaded.</p>}
+                  {pendingFiles.map((file, idx) => (
+                    <div key={`${file.name}-${idx}`} className="flex items-center gap-2 p-2 rounded-md bg-primary/5 border border-primary/20 text-sm">
+                      <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="flex-1 truncate">Pending upload: {file.name}</span>
+                      <span className="text-2xs text-muted-foreground">{Math.max(1, Math.round(file.size / 1024))} KB</span>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setPendingFiles(prev => prev.filter((_, i) => i !== idx))}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                  {(liveIssue.attachments || []).map(att => (
+                    <div key={att.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-accent/50 text-sm group">
+                      <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="flex-1 truncate">{att.name}</span>
+                      <span className="text-2xs text-muted-foreground">{Math.max(1, Math.round(att.size / 1024))} KB</span>
+                      <a href={att.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-muted-foreground hover:text-foreground">
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                      {canEdit && <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => removeAttachment(att.id)}><Trash2 className="h-3 w-3 text-destructive" /></Button>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+
               <div>
                 <Label className="text-xs text-muted-foreground mb-3 block font-semibold uppercase tracking-wider">
-                  <MessageSquare className="h-3.5 w-3.5 inline mr-1" />
-                  Activity ({issue.comments.length})
+                  <MessageSquare className="h-3.5 w-3.5 inline mr-1" /> Activity ({liveIssue.comments.length + pendingComments.length})
                 </Label>
                 <div className="space-y-3">
-                  {issue.comments.map(c => {
+                  {pendingComments.map((c, idx) => (
+                    <div key={`${c}-${idx}`} className="text-xs p-2 rounded-md bg-primary/5 border border-primary/20 flex items-center justify-between">
+                      <span className="truncate pr-2">Pending comment: {c}</span>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setPendingComments(prev => prev.filter((_, i) => i !== idx))}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                  {liveIssue.comments.map(c => {
                     const author = users.find(u => u.id === c.authorId);
                     return (
                       <div key={c.id} className="flex gap-2.5">
-                        <Avatar className="h-7 w-7 shrink-0">
-                          <AvatarFallback className="text-[10px] bg-muted">{author?.initials}</AvatarFallback>
-                        </Avatar>
+                        <Avatar className="h-7 w-7 shrink-0"><AvatarFallback className="text-[10px] bg-muted">{author?.initials}</AvatarFallback></Avatar>
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">{author?.name}</span>
@@ -261,112 +401,61 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
                     );
                   })}
                   <div className="flex gap-2 mt-3">
-                    <Input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment..." className="h-8 text-sm" onKeyDown={e => e.key === 'Enter' && addComment()} />
-                    <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={addComment}>
-                      <Send className="h-3.5 w-3.5" />
-                    </Button>
+                    <Input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment..." className="h-8 text-sm" onKeyDown={e => e.key === 'Enter' && addCommentToDraft()} />
+                    <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={addCommentToDraft}><Send className="h-3.5 w-3.5" /></Button>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Sidebar Details */}
             <div className="space-y-4 text-sm">
               <div>
                 <Label className="text-2xs text-muted-foreground mb-1 block">Status</Label>
-                <Select value={issue.status} onValueChange={(v) => canEdit && updateIssue(issue.id, { status: v as Status })} disabled={!canEdit}>
-                  <SelectTrigger className="h-8">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full ${statusColors[issue.status]}`} />
-                      <SelectValue />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                  </SelectContent>
+                <Select value={draft.status} onValueChange={(v) => setDraft(prev => prev ? { ...prev, status: v as Status } : prev)} disabled={!canEdit}>
+                  <SelectTrigger className="h-8"><div className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${statusColors[draft.status]}`} /><SelectValue /></div></SelectTrigger>
+                  <SelectContent>{(Object.entries(STATUS_LABELS) as [Status, string][]).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
 
               <div>
                 <Label className="text-2xs text-muted-foreground mb-1 block">Priority</Label>
-                <Select value={issue.priority} onValueChange={(v) => canEdit && updateIssue(issue.id, { priority: v as Priority })} disabled={!canEdit}>
-                  <SelectTrigger className="h-8">
-                    <div className="flex items-center gap-1.5">
-                      <PriorityIcon priority={issue.priority} />
-                      <SelectValue />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.entries(PRIORITY_LABELS) as [Priority, string][]).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                  </SelectContent>
+                <Select value={draft.priority} onValueChange={(v) => setDraft(prev => prev ? { ...prev, priority: v as Priority } : prev)} disabled={!canEdit}>
+                  <SelectTrigger className="h-8"><div className="flex items-center gap-1.5"><PriorityIcon priority={draft.priority} /><SelectValue /></div></SelectTrigger>
+                  <SelectContent>{(Object.entries(PRIORITY_LABELS) as [Priority, string][]).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
 
               <div>
                 <Label className="text-2xs text-muted-foreground mb-1 block">Assignee</Label>
-                <Select value={issue.assigneeId || ''} onValueChange={(v) => canEdit && updateIssue(issue.id, { assigneeId: v || null })} disabled={!canEdit}>
+                <Select value={draft.assigneeId || NONE} onValueChange={(v) => setDraft(prev => prev ? { ...prev, assigneeId: v === NONE ? null : v } : prev)} disabled={!canEdit}>
                   <SelectTrigger className="h-8"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                   <SelectContent>
-                    {users.map(u => (
-                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                    ))}
+                    <SelectItem value={NONE}>Unassigned</SelectItem>
+                    {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
 
               <div>
-                <Label className="text-2xs text-muted-foreground mb-1 block">Reporter</Label>
-                <div className="flex items-center gap-2 py-1">
-                  <Avatar className="h-5 w-5">
-                    <AvatarFallback className="text-[9px] bg-muted">{reporter?.initials}</AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm">{reporter?.name}</span>
-                </div>
+                <Label className="text-2xs text-muted-foreground mb-1 block">Story Points</Label>
+                <Input type="number" className="h-8" value={draft.storyPoints ?? ''} onChange={e => setDraft(prev => prev ? { ...prev, storyPoints: e.target.value ? Number(e.target.value) : null } : prev)} disabled={!canEdit} />
               </div>
 
-              {issue.storyPoints !== null && (
-                <div>
-                  <Label className="text-2xs text-muted-foreground mb-1 block">Story Points</Label>
-                  <Badge variant="secondary" className="text-xs">{issue.storyPoints}</Badge>
-                </div>
-              )}
-
-              {/* Due Date */}
-              {issue.dueDate && (
-                <div>
-                  <Label className="text-2xs text-muted-foreground mb-1 block">
-                    <Calendar className="h-3 w-3 inline mr-1" />Due Date
-                  </Label>
-                  <span className={`text-xs ${new Date(issue.dueDate) < new Date() && issue.status !== 'done' ? 'text-destructive font-medium' : ''}`}>
-                    {new Date(issue.dueDate).toLocaleDateString()}
-                  </span>
-                </div>
-              )}
-
-              {/* Time Tracking */}
               <div>
-                <Label className="text-2xs text-muted-foreground mb-1 block">
-                  <Timer className="h-3 w-3 inline mr-1" />Time Tracking
-                </Label>
+                <Label className="text-2xs text-muted-foreground mb-1 block"><Calendar className="h-3 w-3 inline mr-1" />Due Date</Label>
+                <Input type="date" className="h-8" value={draft.dueDate || ''} onChange={e => setDraft(prev => prev ? { ...prev, dueDate: e.target.value || null } : prev)} disabled={!canEdit} />
+              </div>
+
+              <div>
+                <Label className="text-2xs text-muted-foreground mb-1 block">Reporter</Label>
+                <div className="flex items-center gap-2 py-1"><Avatar className="h-5 w-5"><AvatarFallback className="text-[9px] bg-muted">{reporter?.initials}</AvatarFallback></Avatar><span className="text-sm">{reporter?.name}</span></div>
+              </div>
+
+              <div>
+                <Label className="text-2xs text-muted-foreground mb-1 block"><Timer className="h-3 w-3 inline mr-1" />Time Tracking</Label>
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span>Logged: {issue.timeTracking.loggedHours}h</span>
-                    <span>Est: {issue.timeTracking.estimatedHours || '-'}h</span>
-                  </div>
-                  {issue.timeTracking.estimatedHours && (
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          issue.timeTracking.loggedHours > issue.timeTracking.estimatedHours ? 'bg-destructive' : 'bg-primary'
-                        }`}
-                        style={{ width: `${Math.min((issue.timeTracking.loggedHours / issue.timeTracking.estimatedHours) * 100, 100)}%` }}
-                      />
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between text-xs"><span>Logged: {liveIssue.timeTracking.loggedHours}h</span><span>Est: {draft.estimatedHours || '-'}h</span></div>
+                  {canEdit && <Input type="number" className="h-7 text-xs" placeholder="Estimated Hours" value={draft.estimatedHours ?? ''} onChange={e => setDraft(prev => prev ? { ...prev, estimatedHours: e.target.value ? Number(e.target.value) : null } : prev)} />}
                   {canEdit && (
                     <div className="flex gap-1 mt-1">
                       <Input value={logHours} onChange={e => setLogHours(e.target.value)} placeholder="Hours" type="number" className="h-7 text-xs" />
@@ -376,23 +465,25 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
                 </div>
               </div>
 
-              <Separator />
+              {canEdit && (
+                <div className="flex gap-2">
+                  <Button size="sm" className="flex-1 text-xs" onClick={saveDraft} disabled={!hasDraftChanges || savingDraft}>
+                    {savingDraft ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={resetDraft} disabled={!hasDraftChanges}>Reset</Button>
+                </div>
+              )}
 
+              <Separator />
               <div className="space-y-1.5 text-2xs text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  Created {new Date(issue.createdAt).toLocaleDateString()}
-                </div>
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  Updated {new Date(issue.updatedAt).toLocaleDateString()}
-                </div>
+                <div className="flex items-center gap-1"><Clock className="h-3 w-3" />Created {new Date(liveIssue.createdAt).toLocaleDateString()}</div>
+                <div className="flex items-center gap-1"><Clock className="h-3 w-3" />Updated {new Date(liveIssue.updatedAt).toLocaleDateString()}</div>
               </div>
 
               {canEdit && (
                 <>
                   <Separator />
-                  <Button variant="destructive" size="sm" className="w-full text-xs" onClick={() => { deleteIssue(issue.id); onOpenChange(false); }}>
+                  <Button variant="destructive" size="sm" className="w-full text-xs" onClick={() => { deleteIssue(liveIssue.id); onOpenChange(false); }}>
                     <Trash2 className="h-3 w-3 mr-1" /> Delete Issue
                   </Button>
                 </>
@@ -401,13 +492,7 @@ export function IssueDetailDialog({ issue, open, onOpenChange }: IssueDetailDial
           </div>
         </DialogContent>
       </Dialog>
-      <CreateIssueDialog
-        open={createSubtaskOpen}
-        onOpenChange={setCreateSubtaskOpen}
-        parentId={issue.id}
-        defaultSprintId={issue.sprintId}
-        defaultEpicId={issue.epicId}
-      />
+      <CreateIssueDialog open={createSubtaskOpen} onOpenChange={setCreateSubtaskOpen} parentId={liveIssue.id} defaultSprintId={liveIssue.sprintId} defaultEpicId={liveIssue.epicId} />
     </>
   );
 }

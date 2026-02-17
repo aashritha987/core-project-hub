@@ -10,6 +10,8 @@ from .views import (
     EpicDetailView,
     EpicsView,
     IssueCommentCreateView,
+    IssueAttachmentDeleteView,
+    IssueAttachmentUploadView,
     IssueDetailView,
     IssueLinkCreateView,
     IssueLinkDeleteView,
@@ -69,6 +71,8 @@ urlpatterns = [
     path('issues/<str:issue_uid>/watch-toggle/', IssueWatchToggleView.as_view()),
     path('issues/<str:issue_uid>/links/', IssueLinkCreateView.as_view()),
     path('issues/<str:issue_uid>/links/<str:link_uid>/', IssueLinkDeleteView.as_view()),
+    path('issues/<str:issue_uid>/attachments/', IssueAttachmentUploadView.as_view()),
+    path('issues/<str:issue_uid>/attachments/<str:attachment_uid>/', IssueAttachmentDeleteView.as_view()),
 
     path('reports/dashboard/', DashboardReportView.as_view()),
     path('reports/burndown/', BurndownReportView.as_view()),

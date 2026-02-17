@@ -51,6 +51,10 @@ def notification_uid():
     return make_uid('n')
 
 
+def attachment_uid():
+    return make_uid('a')
+
+
 class UserProfile(models.Model):
     ROLE_ADMIN = 'admin'
     ROLE_PM = 'project_manager'
@@ -233,6 +237,19 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False)
     action_url = models.CharField(max_length=255, blank=True, default='')
     metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class IssueAttachment(models.Model):
+    uid = models.CharField(max_length=32, unique=True, default=attachment_uid)
+    issue = models.ForeignKey(Issue, on_delete=models.CASCADE, related_name='attachments')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    file = models.FileField(upload_to='issue_attachments/%Y/%m/%d/')
+    original_name = models.CharField(max_length=255)
+    size = models.BigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

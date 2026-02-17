@@ -41,6 +41,15 @@ export interface TimeTracking {
   loggedHours: number;
 }
 
+export interface IssueAttachment {
+  id: string;
+  name: string;
+  size: number;
+  fileUrl: string;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
 export interface Issue {
   id: string;
   key: string;
@@ -63,6 +72,7 @@ export interface Issue {
   timeTracking: TimeTracking;
   links: IssueLink[];
   watchers: string[];
+  attachments?: IssueAttachment[];
 }
 
 export interface Epic {

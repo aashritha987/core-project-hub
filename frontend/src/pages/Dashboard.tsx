@@ -17,22 +17,28 @@ export default function Dashboard() {
 
   const activeSprint = sprints.find(s => s.status === 'active');
   const sprintIssues = activeSprint ? issues.filter(i => i.sprintId === activeSprint.id) : [];
+  const statusScopeIssues = activeSprint
+    ? sprintIssues
+    : issues;
+  const workloadIssues = activeSprint
+    ? sprintIssues
+    : issues.filter(i => !i.parentId);
 
   const stats = useMemo(() => {
     const byStatus = { todo: 0, in_progress: 0, in_review: 0, done: 0 };
-    sprintIssues.forEach(i => byStatus[i.status]++);
-    const total = sprintIssues.length;
+    statusScopeIssues.forEach(i => byStatus[i.status]++);
+    const total = statusScopeIssues.length;
     const donePercent = total > 0 ? Math.round((byStatus.done / total) * 100) : 0;
-    const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
-    const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
+    const totalPoints = statusScopeIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
+    const donePoints = statusScopeIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
 
     const byAssignee: Record<string, number> = {};
-    sprintIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
+    workloadIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
 
     return { byStatus, total, donePercent, totalPoints, donePoints, byAssignee };
-  }, [sprintIssues]);
+  }, [statusScopeIssues, workloadIssues]);
 
-  const recentActivity = issues
+  const recentActivity = [...issues]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5);
 
@@ -74,6 +80,9 @@ export default function Dashboard() {
               </div>
             </div>
             <Progress value={stats.donePercent} className="mt-3 h-1.5" />
+            <p className="text-2xs text-muted-foreground mt-2">
+              {activeSprint ? activeSprint.name : 'No active sprint · showing overall project'}
+            </p>
           </CardContent>
         </Card>
 

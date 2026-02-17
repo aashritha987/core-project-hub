@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import UserProfile, Project, Label, Epic, Sprint, Issue, IssueComment, IssueLink, Notification
+from .models import UserProfile, Project, Label, Epic, Sprint, Issue, IssueComment, IssueLink, Notification, IssueAttachment
 
 admin.site.register(UserProfile)
 admin.site.register(Project)
@@ -10,3 +10,4 @@ admin.site.register(Issue)
 admin.site.register(IssueComment)
 admin.site.register(IssueLink)
 admin.site.register(Notification)
+admin.site.register(IssueAttachment)

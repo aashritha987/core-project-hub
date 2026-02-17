@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { matchesIssueSearch } from '@/lib/issueSearch';
 
 const columns: Status[] = ['todo', 'in_progress', 'in_review', 'done'];
 
@@ -28,19 +29,24 @@ export default function Board() {
   const [filterEpic, setFilterEpic] = useState<string>('all');
 
   const activeSprint = sprints.find(s => s.status === 'active');
+  const [boardScope, setBoardScope] = useState<string>(activeSprint ? 'active' : 'all');
 
-  const sprintIssues = useMemo(() => {
-    if (!activeSprint) return [];
-    let filtered = issues.filter(i => i.sprintId === activeSprint.id && !i.parentId);
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
+  const boardIssues = useMemo(() => {
+    let filtered = issues.filter(i => !i.parentId);
+
+    if (boardScope === 'active') {
+      filtered = activeSprint ? filtered.filter(i => i.sprintId === activeSprint.id) : filtered;
+    } else if (boardScope === 'backlog') {
+      filtered = filtered.filter(i => !i.sprintId);
+    } else if (boardScope !== 'all') {
+      filtered = filtered.filter(i => i.sprintId === boardScope);
     }
+    filtered = filtered.filter((i) => matchesIssueSearch(i, searchQuery, users, epics));
     if (filterAssignee !== 'all') filtered = filtered.filter(i => i.assigneeId === filterAssignee);
     if (filterType !== 'all') filtered = filtered.filter(i => i.type === filterType);
     if (filterEpic !== 'all') filtered = filtered.filter(i => i.epicId === filterEpic);
     return filtered;
-  }, [issues, searchQuery, filterAssignee, filterType, filterEpic, activeSprint]);
+  }, [issues, searchQuery, filterAssignee, filterType, filterEpic, activeSprint, boardScope, users, epics]);
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
@@ -55,11 +61,24 @@ export default function Board() {
           <div>
             <h1 className="text-lg font-semibold text-foreground">Board</h1>
             <p className="text-2xs text-muted-foreground">
-              {activeSprint ? `${activeSprint.name} · ${activeSprint.startDate.slice(5)} – ${activeSprint.endDate.slice(5)}` : 'No active sprint'}
+              {activeSprint ? `${activeSprint.name} · ${activeSprint.startDate.slice(5)} - ${activeSprint.endDate.slice(5)}` : 'No active sprint'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={boardScope} onValueChange={setBoardScope}>
+            <SelectTrigger className="h-7 w-[170px] text-xs">
+              <SelectValue placeholder="Board Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active Sprint</SelectItem>
+              <SelectItem value="backlog">Backlog</SelectItem>
+              <SelectItem value="all">All Issues</SelectItem>
+              {sprints.map(s => (
+                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filterAssignee} onValueChange={setFilterAssignee}>
             <SelectTrigger className="h-7 w-[140px] text-xs">
               <User className="h-3 w-3 mr-1" />
@@ -107,7 +126,7 @@ export default function Board() {
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="flex gap-4 min-h-[calc(100vh-220px)]">
             {columns.map(status => {
-              const columnIssues = sprintIssues.filter(i => i.status === status);
+              const columnIssues = boardIssues.filter(i => i.status === status);
               return (
                 <div key={status} className={cn('flex flex-col w-72 min-w-[288px] bg-board-column rounded-lg border-t-2', columnStyles[status])}>
                   <div className="flex items-center justify-between px-3 py-2.5">

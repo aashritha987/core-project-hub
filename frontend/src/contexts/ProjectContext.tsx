@@ -101,13 +101,6 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
 
   const currentProject = projects.find((p) => p.id === selectedProjectId) || projects[0] || emptyProject;
 
-  const loadIssues = useCallback(async (projectId: string, query: string) => {
-    const q = query.trim();
-    const searchSuffix = q ? `&search=${encodeURIComponent(q)}` : '';
-    const loadedIssues = await apiRequest<Issue[]>(`/issues/?project_id=${projectId}${searchSuffix}`);
-    setIssues(loadedIssues);
-  }, []);
-
   const refreshUsers = useCallback(async () => {
     const loadedUsers = await apiRequest<User[]>('/users/');
     setUsers(loadedUsers);
@@ -149,11 +142,13 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
 
     const loadProjectData = async () => {
       try {
-        const [loadedSprints, loadedEpics, loadedLabels] = await Promise.all([
+        const [loadedIssues, loadedSprints, loadedEpics, loadedLabels] = await Promise.all([
+          apiRequest<Issue[]>(`/issues/?project_id=${selectedProjectId}`),
           apiRequest<Sprint[]>(`/sprints/?project_id=${selectedProjectId}`),
           apiRequest<Epic[]>(`/epics/?project_id=${selectedProjectId}`),
           apiRequest<Label[]>(`/labels/?project_id=${selectedProjectId}`),
         ]);
+        setIssues(loadedIssues);
         setSprints(loadedSprints);
         setEpics(loadedEpics);
         setLabels(loadedLabels);
@@ -166,12 +161,8 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   }, [isAuthenticated, selectedProjectId]);
 
   useEffect(() => {
-    if (!isAuthenticated || !selectedProjectId) return;
-    const timer = setTimeout(() => {
-      loadIssues(selectedProjectId, searchQuery).catch(console.error);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [isAuthenticated, selectedProjectId, searchQuery, loadIssues]);
+    setSearchQuery('');
+  }, [selectedProjectId]);
 
   const addIssue = useCallback(async (issue: Issue) => {
     const created = await apiRequest<Issue>('/issues/', {

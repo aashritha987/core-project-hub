@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Columns3, List, Settings, Search, ChevronDown,
-  Zap, BarChart3, Bug, Milestone, Users
+  Zap, BarChart3, Bug, Milestone, Users, X
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useProject } from '@/contexts/ProjectContext';
@@ -113,8 +113,19 @@ export function AppSidebar() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search issues..."
-            className="pl-8 h-8 text-sm bg-muted/50 border-0 focus-visible:ring-1"
+            className="pl-8 pr-8 h-8 text-sm bg-muted/50 border-0 focus-visible:ring-1"
           />
+          {searchQuery.trim().length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Epic, Issue, IssueComment, IssueLink, Label, Notification, Project, Sprint
+from .models import Epic, Issue, IssueAttachment, IssueComment, IssueLink, Label, Notification, Project, Sprint
 
 User = get_user_model()
 
@@ -105,6 +105,27 @@ class LinkSerializer(serializers.ModelSerializer):
         fields = ['id', 'type', 'targetIssueId']
 
 
+class AttachmentSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source='uid', read_only=True)
+    name = serializers.CharField(source='original_name', read_only=True)
+    uploadedBy = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    fileUrl = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IssueAttachment
+        fields = ['id', 'name', 'size', 'fileUrl', 'uploadedBy', 'createdAt']
+
+    def get_uploadedBy(self, obj):
+        return _user_uid(obj.uploaded_by)
+
+    def get_fileUrl(self, obj):
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.file.url)
+        return obj.file.url
+
+
 class IssueSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source='uid', read_only=True)
     type = serializers.CharField(source='issue_type')
@@ -122,6 +143,7 @@ class IssueSerializer(serializers.ModelSerializer):
     timeTracking = serializers.SerializerMethodField()
     links = LinkSerializer(many=True, read_only=True)
     watchers = serializers.SerializerMethodField()
+    attachments = AttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Issue
@@ -130,6 +152,7 @@ class IssueSerializer(serializers.ModelSerializer):
             'assigneeId', 'reporterId', 'labels', 'storyPoints', 'sprintId', 'epicId',
             'parentId', 'comments', 'createdAt', 'updatedAt', 'dueDate', 'timeTracking',
             'links', 'watchers',
+            'attachments',
         ]
 
     def get_assigneeId(self, obj):

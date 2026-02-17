@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CreateIssueDialog } from '@/components/issues/CreateIssueDialog';
+import { matchesIssueSearch } from '@/lib/issueSearch';
 
 export default function Backlog() {
-  const { issues, searchQuery, sprints, epics } = useProject();
+  const { issues, searchQuery, sprints, epics, users } = useProject();
   const { canManageSprints } = useAuth();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [expandedSprints, setExpandedSprints] = useState<Set<string>>(new Set([...sprints.filter(s => s.status !== 'completed').map(s => s.id), 'backlog']));
@@ -28,13 +29,10 @@ export default function Backlog() {
 
   const filteredIssues = useMemo(() => {
     let result = issues.filter(i => !i.parentId); // exclude subtasks
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
-    }
+    result = result.filter((i) => matchesIssueSearch(i, searchQuery, users, epics));
     if (filterEpic !== 'all') result = result.filter(i => i.epicId === filterEpic);
     return result;
-  }, [issues, searchQuery, filterEpic]);
+  }, [issues, searchQuery, filterEpic, users, epics]);
 
   const groupedIssues = useMemo(() => {
     const groups: { id: string; name: string; issues: Issue[]; meta?: string; status?: string }[] = [];

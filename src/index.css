@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 214 32% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 214 32% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 214 32% 14%;
+
+    --primary: 214 100% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 16% 93%;
+    --secondary-foreground: 214 32% 14%;
+
+    --muted: 210 14% 95%;
+    --muted-foreground: 214 10% 45%;
+
+    --accent: 210 16% 93%;
+    --accent-foreground: 214 32% 14%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 20% 89%;
+    --input: 214 20% 89%;
+    --ring: 214 100% 40%;
+
+    --radius: 0.375rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 214 10% 35%;
+    --sidebar-primary: 214 100% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 100% 96%;
+    --sidebar-accent-foreground: 214 100% 30%;
+    --sidebar-border: 214 20% 92%;
+    --sidebar-ring: 214 100% 40%;
+
+    /* JIRA-specific tokens */
+    --jira-blue: 214 100% 40%;
+    --jira-blue-light: 214 100% 96%;
+    --jira-blue-hover: 214 100% 35%;
+    --jira-green: 154 60% 40%;
+    --jira-green-light: 154 60% 94%;
+    --jira-yellow: 40 95% 54%;
+    --jira-yellow-light: 40 95% 94%;
+    --jira-red: 0 72% 51%;
+    --jira-red-light: 0 72% 95%;
+    --jira-purple: 258 60% 55%;
+    --jira-purple-light: 258 60% 95%;
+    --jira-orange: 25 90% 52%;
+    --jira-orange-light: 25 90% 94%;
+
+    --issue-story: 154 60% 40%;
+    --issue-bug: 0 72% 51%;
+    --issue-task: 214 100% 40%;
+    --issue-epic: 258 60% 55%;
+    --issue-spike: 25 90% 52%;
+
+    --priority-highest: 0 72% 51%;
+    --priority-high: 25 90% 52%;
+    --priority-medium: 40 95% 54%;
+    --priority-low: 214 100% 40%;
+    --priority-lowest: 214 40% 65%;
+
+    --status-todo: 210 14% 85%;
+    --status-progress: 214 100% 40%;
+    --status-review: 258 60% 55%;
+    --status-done: 154 60% 40%;
+
+    --board-column-bg: 210 16% 96%;
+    --board-column-header: 214 10% 35%;
+  }
+
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 210 20% 92%;
+    --card: 220 20% 13%;
+    --card-foreground: 210 20% 92%;
+    --popover: 220 20% 13%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 214 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 20%;
+    --secondary-foreground: 210 20% 92%;
+    --muted: 220 14% 18%;
+    --muted-foreground: 214 10% 55%;
+    --accent: 220 14% 20%;
+    --accent-foreground: 210 20% 92%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 14% 22%;
+    --input: 220 14% 22%;
+    --ring: 214 100% 55%;
+    --sidebar-background: 220 20% 11%;
+    --sidebar-foreground: 210 14% 65%;
+    --sidebar-primary: 214 100% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 18%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 220 14% 20%;
+    --sidebar-ring: 214 100% 55%;
+
+    --jira-blue: 214 100% 62%;
+    --jira-blue-light: 214 40% 20%;
+    --jira-blue-hover: 214 100% 56%;
+    --jira-green: 154 52% 56%;
+    --jira-green-light: 154 32% 20%;
+    --jira-yellow: 40 92% 62%;
+    --jira-yellow-light: 40 32% 20%;
+    --jira-red: 0 80% 66%;
+    --jira-red-light: 0 32% 20%;
+    --jira-purple: 258 75% 68%;
+    --jira-purple-light: 258 32% 20%;
+    --jira-orange: 25 92% 62%;
+    --jira-orange-light: 25 32% 20%;
+
+    --issue-story: 154 52% 56%;
+    --issue-bug: 0 80% 66%;
+    --issue-task: 214 100% 62%;
+    --issue-epic: 258 75% 68%;
+    --issue-spike: 25 92% 62%;
+
+    --priority-highest: 0 80% 66%;
+    --priority-high: 25 92% 62%;
+    --priority-medium: 40 92% 62%;
+    --priority-low: 214 100% 62%;
+    --priority-lowest: 214 25% 70%;
+
+    --status-todo: 220 12% 42%;
+    --status-progress: 214 100% 62%;
+    --status-review: 258 75% 68%;
+    --status-done: 154 52% 56%;
+
+    --board-column-bg: 220 18% 14%;
+    --board-column-header: 210 14% 75%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    font-size: 14px;
+  }
+}
+
+@layer components {
+  .jira-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .jira-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .jira-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+  .jira-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}

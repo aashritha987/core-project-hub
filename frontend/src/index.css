@@ -77,6 +77,16 @@
 
     --board-column-bg: 210 16% 96%;
     --board-column-header: 214 10% 35%;
+
+    --presence-online: 152 69% 45%;
+    --avatar-1: 214 80% 45%;
+    --avatar-2: 154 55% 40%;
+    --avatar-3: 258 55% 52%;
+    --avatar-4: 40 85% 50%;
+    --avatar-5: 0 65% 50%;
+    --avatar-6: 185 60% 42%;
+    --avatar-7: 230 65% 52%;
+    --avatar-8: 168 55% 40%;
   }
 
   .dark {
@@ -141,6 +151,16 @@
 
     --board-column-bg: 220 18% 14%;
     --board-column-header: 210 14% 75%;
+
+    --presence-online: 152 60% 50%;
+    --avatar-1: 214 90% 60%;
+    --avatar-2: 154 50% 55%;
+    --avatar-3: 258 65% 65%;
+    --avatar-4: 40 80% 58%;
+    --avatar-5: 0 70% 60%;
+    --avatar-6: 185 55% 50%;
+    --avatar-7: 230 60% 60%;
+    --avatar-8: 168 50% 50%;
   }
 }
 

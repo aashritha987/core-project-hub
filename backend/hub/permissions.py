@@ -25,3 +25,11 @@ def can_edit_issue(user, issue):
     if not profile or profile.role != UserProfile.ROLE_DEV:
         return False
     return issue.assignee_id == user.id or issue.reporter_id == user.id
+
+
+def can_manage_project_onboarding(user, project):
+    if not user.is_authenticated:
+        return False
+    if can_manage_project(user) or can_manage_sprints(user):
+        return True
+    return project.lead_id == user.id

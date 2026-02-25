@@ -4,7 +4,9 @@ export type Status = 'todo' | 'in_progress' | 'in_review' | 'done';
 export type SprintStatus = 'active' | 'planned' | 'completed';
 export type UserRole = 'admin' | 'project_manager' | 'developer' | 'viewer';
 export type LinkType = 'blocks' | 'is_blocked_by' | 'relates_to' | 'duplicates' | 'is_duplicated_by';
-export type NotificationType = 'info' | 'assignment' | 'comment' | 'status_change' | 'sprint' | 'system';
+export type NotificationType = 'info' | 'assignment' | 'comment' | 'status_change' | 'sprint' | 'system' | 'chat';
+export type SetupPlatform = 'windows' | 'linux' | 'macos' | 'other';
+export type ChatRoomType = 'dm' | 'channel';
 
 export interface User {
   id: string;
@@ -28,6 +30,8 @@ export interface Comment {
   authorId: string;
   content: string;
   createdAt: string;
+  updatedAt: string;
+  isEdited: boolean;
 }
 
 export interface IssueLink {
@@ -41,6 +45,15 @@ export interface TimeTracking {
   loggedHours: number;
 }
 
+export interface IssueAttachment {
+  id: string;
+  name: string;
+  size: number;
+  fileUrl: string;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
 export interface Issue {
   id: string;
   key: string;
@@ -52,7 +65,6 @@ export interface Issue {
   assigneeId: string | null;
   reporterId: string;
   labels: string[];
-  storyPoints: number | null;
   sprintId: string | null;
   epicId: string | null;
   parentId: string | null;
@@ -63,6 +75,7 @@ export interface Issue {
   timeTracking: TimeTracking;
   links: IssueLink[];
   watchers: string[];
+  attachments?: IssueAttachment[];
 }
 
 export interface Epic {
@@ -103,6 +116,65 @@ export interface Notification {
   actionUrl: string;
   metadata: Record<string, unknown>;
   createdAt: string;
+}
+
+export interface ChatParticipant {
+  userId: string;
+  name: string;
+  avatar: string;
+  role: 'owner' | 'member';
+}
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar: string;
+  content: string;
+  isEdited: boolean;
+  isDeleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatRoom {
+  id: string;
+  type: ChatRoomType;
+  name: string;
+  projectId: string | null;
+  isPrivate: boolean;
+  participants: ChatParticipant[];
+  unreadCount: number;
+  lastMessage: ChatMessage | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformSetupInstruction {
+  id: string;
+  onboardingId: string;
+  platform: SetupPlatform;
+  title: string;
+  content: string;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  createdById: string | null;
+  updatedById: string | null;
+}
+
+export interface ProjectOnboarding {
+  id: string;
+  projectId: string;
+  overview: string;
+  repositoryUrl: string;
+  prerequisites: string;
+  instructions: PlatformSetupInstruction[];
+  createdAt: string;
+  updatedAt: string;
+  createdById: string | null;
+  updatedById: string | null;
 }
 
 export const STATUS_LABELS: Record<Status, string> = {

@@ -6,6 +6,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { LiveTimerProvider } from "@/contexts/LiveTimerContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Board from "./pages/Board";
@@ -15,10 +17,11 @@ import Reports from "./pages/Reports";
 import Epics from "./pages/Epics";
 import SprintManagement from "./pages/SprintManagement";
 import ProjectSettings from "./pages/ProjectSettings";
+import ProjectOnboarding from "./pages/ProjectOnboarding";
 import UserManagement from "./pages/UserManagement";
 import HelpGuide from "./pages/HelpGuide";
+import Chat from "./pages/Chat";
 import Login from "./pages/Login";
-import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import NotFound from "./pages/NotFound";
 
@@ -41,7 +44,7 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
 const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
-    <Route path="/register" element={<AuthRoute><Register /></AuthRoute>} />
+    <Route path="/register" element={<Navigate to="/login" replace />} />
     <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
     <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
     <Route path="/board" element={<ProtectedRoute><AppLayout><Board /></AppLayout></ProtectedRoute>} />
@@ -51,28 +54,34 @@ const AppRoutes = () => (
     <Route path="/epics" element={<ProtectedRoute><AppLayout><Epics /></AppLayout></ProtectedRoute>} />
     <Route path="/sprints" element={<ProtectedRoute><AppLayout><SprintManagement /></AppLayout></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><AppLayout><ProjectSettings /></AppLayout></ProtectedRoute>} />
+    <Route path="/onboarding" element={<ProtectedRoute><AppLayout><ProjectOnboarding /></AppLayout></ProtectedRoute>} />
     <Route path="/users" element={<ProtectedRoute><AppLayout><UserManagement /></AppLayout></ProtectedRoute>} />
     <Route path="/help" element={<ProtectedRoute><AppLayout><HelpGuide /></AppLayout></ProtectedRoute>} />
+    <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <ProjectProvider>
-            <NotificationProvider>
-              <AppRoutes />
-            </NotificationProvider>
-          </ProjectProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <ProjectProvider>
+              <LiveTimerProvider>
+                <NotificationProvider>
+                  <AppRoutes />
+                </NotificationProvider>
+              </LiveTimerProvider>
+            </ProjectProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

@@ -30,7 +30,6 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
   const [type, setType] = useState<IssueType>(parentId ? 'subtask' : 'task');
   const [priority, setPriority] = useState<Priority>('medium');
   const [assigneeId, setAssigneeId] = useState<string>(NONE);
-  const [storyPoints, setStoryPoints] = useState('');
   const [sprintId, setSprintId] = useState(defaultSprintId || NONE);
   const [epicId, setEpicId] = useState(defaultEpicId || NONE);
   const [dueDate, setDueDate] = useState('');
@@ -57,7 +56,6 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
       assigneeId: assigneeId === NONE ? null : assigneeId,
       reporterId: currentUser?.id || 'u1',
       labels: [],
-      storyPoints: storyPoints ? parseInt(storyPoints) : null,
       sprintId: sprintId === NONE ? null : sprintId,
       epicId: epicId === NONE ? null : epicId,
       parentId: parentId || null,
@@ -72,7 +70,7 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
     await addIssue(newIssue);
     onOpenChange(false);
     setTitle(''); setDescription(''); setType(parentId ? 'subtask' : 'task'); setPriority('medium');
-    setAssigneeId(NONE); setStoryPoints(''); setSprintId(NONE); setEpicId(NONE); setDueDate(''); setEstimatedHours('');
+    setAssigneeId(NONE); setSprintId(NONE); setEpicId(NONE); setDueDate(''); setEstimatedHours('');
   };
 
   const activeSprints = sprints.filter(s => s.status !== 'completed');
@@ -132,10 +130,6 @@ export function CreateIssueDialog({ open, onOpenChange, parentId, defaultSprintI
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Story Points</Label>
-              <Input value={storyPoints} onChange={e => setStoryPoints(e.target.value)} placeholder="0" type="number" className="h-9" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

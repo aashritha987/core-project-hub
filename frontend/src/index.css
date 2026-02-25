@@ -107,6 +107,40 @@
     --sidebar-accent-foreground: 210 20% 92%;
     --sidebar-border: 220 14% 20%;
     --sidebar-ring: 214 100% 55%;
+
+    --jira-blue: 214 100% 62%;
+    --jira-blue-light: 214 40% 20%;
+    --jira-blue-hover: 214 100% 56%;
+    --jira-green: 154 52% 56%;
+    --jira-green-light: 154 32% 20%;
+    --jira-yellow: 40 92% 62%;
+    --jira-yellow-light: 40 32% 20%;
+    --jira-red: 0 80% 66%;
+    --jira-red-light: 0 32% 20%;
+    --jira-purple: 258 75% 68%;
+    --jira-purple-light: 258 32% 20%;
+    --jira-orange: 25 92% 62%;
+    --jira-orange-light: 25 32% 20%;
+
+    --issue-story: 154 52% 56%;
+    --issue-bug: 0 80% 66%;
+    --issue-task: 214 100% 62%;
+    --issue-epic: 258 75% 68%;
+    --issue-spike: 25 92% 62%;
+
+    --priority-highest: 0 80% 66%;
+    --priority-high: 25 92% 62%;
+    --priority-medium: 40 92% 62%;
+    --priority-low: 214 100% 62%;
+    --priority-lowest: 214 25% 70%;
+
+    --status-todo: 220 12% 42%;
+    --status-progress: 214 100% 62%;
+    --status-review: 258 75% 68%;
+    --status-done: 154 52% 56%;
+
+    --board-column-bg: 220 18% 14%;
+    --board-column-header: 210 14% 75%;
   }
 }
 

@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CreateIssueDialog } from '@/components/issues/CreateIssueDialog';
+import { matchesIssueSearch } from '@/lib/issueSearch';
 
 export default function Backlog() {
-  const { issues, searchQuery, sprints, epics } = useProject();
+  const { issues, searchQuery, sprints, epics, users } = useProject();
   const { canManageSprints } = useAuth();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [expandedSprints, setExpandedSprints] = useState<Set<string>>(new Set([...sprints.filter(s => s.status !== 'completed').map(s => s.id), 'backlog']));
@@ -28,13 +29,10 @@ export default function Backlog() {
 
   const filteredIssues = useMemo(() => {
     let result = issues.filter(i => !i.parentId); // exclude subtasks
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(i => i.title.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
-    }
+    result = result.filter((i) => matchesIssueSearch(i, searchQuery, users, epics));
     if (filterEpic !== 'all') result = result.filter(i => i.epicId === filterEpic);
     return result;
-  }, [issues, searchQuery, filterEpic]);
+  }, [issues, searchQuery, filterEpic, users, epics]);
 
   const groupedIssues = useMemo(() => {
     const groups: { id: string; name: string; issues: Issue[]; meta?: string; status?: string }[] = [];
@@ -54,8 +52,6 @@ export default function Backlog() {
     });
     return groups;
   }, [filteredIssues, sprints]);
-
-  const totalPoints = (items: Issue[]) => items.reduce((s, i) => s + (i.storyPoints || 0), 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -105,7 +101,6 @@ export default function Backlog() {
               <span className="text-sm font-semibold text-foreground">{group.name}</span>
               {group.status && <Badge variant={group.status === 'active' ? 'default' : 'secondary'} className="text-2xs">{group.status}</Badge>}
               <Badge variant="secondary" className="text-2xs ml-1">{group.issues.length} issues</Badge>
-              <Badge variant="outline" className="text-2xs">{totalPoints(group.issues)} pts</Badge>
               {group.meta && (
                 <span className="text-2xs text-muted-foreground ml-auto">{group.meta}</span>
               )}

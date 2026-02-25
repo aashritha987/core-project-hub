@@ -93,8 +93,6 @@ export default function SprintManagement() {
         {sortedSprints.map(sprint => {
           const sprintIssues = issues.filter(i => i.sprintId === sprint.id);
           const doneCount = sprintIssues.filter(i => i.status === 'done').length;
-          const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
-          const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
           const daysLeft = Math.ceil((new Date(sprint.endDate).getTime() - Date.now()) / 86400000);
 
           return (
@@ -118,7 +116,6 @@ export default function SprintManagement() {
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{sprint.startDate} → {sprint.endDate}</span>
                       <span>{sprintIssues.length} issues</span>
                       <span>{doneCount}/{sprintIssues.length} done</span>
-                      <span>{donePoints}/{totalPoints} story points</span>
                     </div>
                     {sprint.status !== 'completed' && sprintIssues.length > 0 && (
                       <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden w-64">

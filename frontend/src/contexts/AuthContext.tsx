@@ -7,7 +7,6 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<{ success: boolean; message: string }>;
   hasRole: (roles: UserRole[]) => boolean;
@@ -87,22 +86,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string) => {
-    try {
-      const resp = await apiRequest<AuthResponse>('/auth/register/', {
-        method: 'POST',
-        body: { name, email, password },
-        auth: false,
-      });
-      setToken(resp.token);
-      setCurrentUser(resp.user);
-      localStorage.setItem(USER_KEY, JSON.stringify(resp.user));
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Registration failed' };
-    }
-  }, []);
-
   const logout = useCallback(async () => {
     try {
       await apiRequest('/auth/logout/', { method: 'POST' });
@@ -151,7 +134,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isAuthenticated: !!currentUser,
         isInitializing,
         login,
-        register,
         logout,
         forgotPassword,
         hasRole,

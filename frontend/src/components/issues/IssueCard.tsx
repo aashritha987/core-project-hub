@@ -100,11 +100,6 @@ export function IssueCard({ issue, onClick, compact }: IssueCardProps) {
                 {issue.timeTracking.loggedHours}/{issue.timeTracking.estimatedHours || '?'}h
               </span>
             )}
-            {issue.storyPoints && (
-              <span className="bg-muted text-muted-foreground text-2xs px-1.5 py-0.5 rounded-full font-medium">
-                {issue.storyPoints}
-              </span>
-            )}
             {assignee && (
               <Avatar className="h-6 w-6">
                 <AvatarFallback className="text-[10px] bg-muted">{assignee.initials}</AvatarFallback>

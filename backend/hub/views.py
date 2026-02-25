@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import timedelta
+import re
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -9,13 +10,31 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Epic, Issue, IssueComment, IssueLink, Label, Notification, Project, Sprint
-from .permissions import can_edit_issue, can_manage_project, can_manage_sprints
+from .models import (
+    ChatMessage,
+    ChatParticipant,
+    ChatRoom,
+    Epic,
+    Issue,
+    IssueAttachment,
+    IssueComment,
+    IssueLink,
+    Label,
+    Notification,
+    PlatformSetupInstruction,
+    Project,
+    ProjectOnboarding,
+    Sprint,
+)
+from .permissions import can_edit_issue, can_manage_project, can_manage_project_onboarding, can_manage_sprints
 from .serializers import (
+    ChatMessageSerializer,
+    ChatRoomSerializer,
     EpicSerializer,
     EpicWriteSerializer,
     ForgotPasswordSerializer,
@@ -23,9 +42,12 @@ from .serializers import (
     IssueWriteSerializer,
     LabelSerializer,
     LoginSerializer,
+    PlatformSetupInstructionSerializer,
+    PlatformSetupInstructionWriteSerializer,
     ProjectSerializer,
+    ProjectOnboardingSerializer,
+    ProjectOnboardingWriteSerializer,
     ProjectWriteSerializer,
-    RegisterSerializer,
     SprintSerializer,
     SprintWriteSerializer,
     NotificationSerializer,
@@ -34,6 +56,7 @@ from .serializers import (
 )
 
 User = get_user_model()
+MENTION_PATTERN = re.compile(r'(?<!\w)@([A-Za-z0-9._-]{2,64})')
 
 
 def _user_by_uid(uid: str):
@@ -56,6 +79,19 @@ def _sprint_by_uid(uid: str):
 
 def _issue_by_uid(uid: str):
     return Issue.objects.filter(uid=uid).first()
+
+
+def _chat_room_by_uid(uid: str):
+    return ChatRoom.objects.filter(uid=uid).first()
+
+
+def _chat_message_by_uid(uid: str):
+    return ChatMessage.objects.filter(uid=uid).first()
+
+
+def _dm_key(user_a_id: int, user_b_id: int):
+    low, high = sorted([user_a_id, user_b_id])
+    return f'global:{low}:{high}'
 
 
 def _create_notifications(users, *, title: str, message: str, notification_type: str, actor=None, action_url: str = '', metadata=None):
@@ -93,11 +129,72 @@ def _create_notifications(users, *, title: str, message: str, notification_type:
             )
 
 
+def _emit_chat_event(room: ChatRoom, event_type: str, payload: dict):
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    async_to_sync(channel_layer.group_send)(
+        f'chat_room_{room.uid}',
+        {
+            'type': 'chat_event',
+            'event_type': event_type,
+            'payload': payload,
+        },
+    )
+
+
+def _is_chat_member(room: ChatRoom, user):
+    return room.chat_participants.filter(user=user).exists()
+
+
+def _extract_mentions(content: str) -> list[str]:
+    return list({token.lower() for token in MENTION_PATTERN.findall(content or '')})
+
+
+def _resolve_mentioned_users(issue: Issue, content: str):
+    mention_tokens = _extract_mentions(content)
+    if not mention_tokens:
+        return []
+
+    participants = list(_project_participants(issue.project))
+    mentioned_users = []
+    seen_ids = set()
+
+    for user in participants:
+        full_name = (user.get_full_name() or '').strip().lower()
+        username = (user.username or '').strip().lower()
+        email_local = (user.email.split('@', 1)[0] if user.email else '').strip().lower()
+        first_name = (user.first_name or '').strip().lower()
+        last_name = (user.last_name or '').strip().lower()
+        full_name_compact = full_name.replace(' ', '')
+
+        if any(
+            token in {
+                username,
+                email_local,
+                first_name,
+                last_name,
+                full_name,
+                full_name_compact,
+            }
+            for token in mention_tokens
+        ):
+            if user.id not in seen_ids:
+                seen_ids.add(user.id)
+                mentioned_users.append(user)
+
+    return mentioned_users
+
+
 def _project_participants(project: Project):
     user_ids = set([project.lead_id])
     user_ids.update(Issue.objects.filter(project=project).exclude(assignee=None).values_list('assignee_id', flat=True))
     user_ids.update(Issue.objects.filter(project=project).values_list('reporter_id', flat=True))
     return User.objects.filter(id__in=user_ids)
+
+
+def _issue_response(issue: Issue, request):
+    return IssueSerializer(issue, context={'request': request}).data
 
 
 def _apply_issue_payload(issue: Issue, payload: dict, request_user):
@@ -115,8 +212,6 @@ def _apply_issue_payload(issue: Issue, payload: dict, request_user):
         issue.assignee = _user_by_uid(payload.get('assigneeId'))
     if 'reporterId' in payload:
         issue.reporter = _user_by_uid(payload.get('reporterId')) or request_user
-    if 'storyPoints' in payload:
-        issue.story_points = payload.get('storyPoints')
     if 'sprintId' in payload:
         issue.sprint = _sprint_by_uid(payload.get('sprintId'))
     if 'epicId' in payload:
@@ -147,31 +242,6 @@ class AuthLoginView(APIView):
         user = authenticate(request, username=serializer.validated_data['email'], password=serializer.validated_data['password'])
         if not user:
             return Response({'success': False, 'error': 'Invalid email or password'}, status=status.HTTP_400_BAD_REQUEST)
-        token, _ = Token.objects.get_or_create(user=user)
-        return Response({'success': True, 'token': token.key, 'user': UserSerializer(user).data})
-
-
-class AuthRegisterView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data['email'].lower()
-        if User.objects.filter(email=email).exists():
-            return Response({'success': False, 'error': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
-
-        name = serializer.validated_data['name'].strip()
-        first, *rest = name.split(' ')
-        user = User.objects.create_user(
-            username=email,
-            email=email,
-            first_name=first,
-            last_name=' '.join(rest),
-            password=serializer.validated_data['password'],
-        )
-        user.profile.role = 'developer'
-        user.profile.save(update_fields=['role'])
         token, _ = Token.objects.get_or_create(user=user)
         return Response({'success': True, 'token': token.key, 'user': UserSerializer(user).data})
 
@@ -333,6 +403,129 @@ class ProjectDetailView(APIView):
         if not project:
             return Response(status=status.HTTP_204_NO_CONTENT)
         project.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProjectOnboardingView(APIView):
+    def get(self, request, project_uid):
+        project = _project_by_uid(project_uid)
+        if not project:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        onboarding = ProjectOnboarding.objects.filter(project=project).prefetch_related('instructions').first()
+        can_edit = can_manage_project_onboarding(request.user, project)
+        if not onboarding:
+            return Response({'exists': False, 'canEdit': can_edit, 'onboarding': None})
+        return Response(
+            {
+                'exists': True,
+                'canEdit': can_edit,
+                'onboarding': ProjectOnboardingSerializer(onboarding, context={'request': request}).data,
+            }
+        )
+
+    def put(self, request, project_uid):
+        project = _project_by_uid(project_uid)
+        if not project:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_project_onboarding(request.user, project):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = ProjectOnboardingWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        onboarding, _ = ProjectOnboarding.objects.get_or_create(
+            project=project,
+            defaults={'created_by': request.user, 'updated_by': request.user},
+        )
+        if 'overview' in serializer.validated_data:
+            onboarding.overview = serializer.validated_data.get('overview', '')
+        if 'repositoryUrl' in serializer.validated_data:
+            onboarding.repository_url = serializer.validated_data.get('repositoryUrl', '')
+        if 'prerequisites' in serializer.validated_data:
+            onboarding.prerequisites = serializer.validated_data.get('prerequisites', '')
+        if onboarding.created_by_id is None:
+            onboarding.created_by = request.user
+        onboarding.updated_by = request.user
+        onboarding.save()
+        return Response(
+            {
+                'exists': True,
+                'canEdit': True,
+                'onboarding': ProjectOnboardingSerializer(onboarding, context={'request': request}).data,
+            }
+        )
+
+    patch = put
+
+
+class PlatformSetupInstructionListCreateView(APIView):
+    def post(self, request, project_uid):
+        project = _project_by_uid(project_uid)
+        if not project:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_project_onboarding(request.user, project):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        onboarding, _ = ProjectOnboarding.objects.get_or_create(
+            project=project,
+            defaults={'created_by': request.user, 'updated_by': request.user},
+        )
+
+        serializer = PlatformSetupInstructionWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instruction = PlatformSetupInstruction.objects.create(
+            onboarding=onboarding,
+            platform=serializer.validated_data['platform'],
+            title=serializer.validated_data['title'],
+            content=serializer.validated_data['content'],
+            display_order=serializer.validated_data.get('displayOrder', 0),
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        onboarding.updated_by = request.user
+        onboarding.save(update_fields=['updated_by', 'updated_at'])
+        return Response(
+            PlatformSetupInstructionSerializer(instruction, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PlatformSetupInstructionDetailView(APIView):
+    def patch(self, request, instruction_uid):
+        instruction = PlatformSetupInstruction.objects.select_related('onboarding__project').filter(uid=instruction_uid).first()
+        if not instruction:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_project_onboarding(request.user, instruction.onboarding.project):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = PlatformSetupInstructionWriteSerializer(
+            data={
+                'platform': request.data.get('platform', instruction.platform),
+                'title': request.data.get('title', instruction.title),
+                'content': request.data.get('content', instruction.content),
+                'displayOrder': request.data.get('displayOrder', instruction.display_order),
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        instruction.platform = serializer.validated_data['platform']
+        instruction.title = serializer.validated_data['title']
+        instruction.content = serializer.validated_data['content']
+        instruction.display_order = serializer.validated_data.get('displayOrder', instruction.display_order)
+        instruction.updated_by = request.user
+        instruction.save()
+
+        instruction.onboarding.updated_by = request.user
+        instruction.onboarding.save(update_fields=['updated_by', 'updated_at'])
+        return Response(PlatformSetupInstructionSerializer(instruction, context={'request': request}).data)
+
+    def delete(self, request, instruction_uid):
+        instruction = PlatformSetupInstruction.objects.select_related('onboarding__project').filter(uid=instruction_uid).first()
+        if not instruction:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if not can_manage_project_onboarding(request.user, instruction.onboarding.project):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        onboarding = instruction.onboarding
+        instruction.delete()
+        onboarding.updated_by = request.user
+        onboarding.save(update_fields=['updated_by', 'updated_at'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -534,7 +727,7 @@ class IssuesView(APIView):
             qs = qs.filter(parent__isnull=True)
 
         issues = qs.order_by('-updated_at')
-        return Response(IssueSerializer(issues, many=True).data)
+        return Response(IssueSerializer(issues, many=True, context={'request': request}).data)
 
     @transaction.atomic
     def post(self, request):
@@ -567,7 +760,7 @@ class IssuesView(APIView):
             action_url='/backlog',
             metadata={'issueId': issue.uid, 'issueKey': issue.key},
         )
-        return Response(IssueSerializer(issue).data, status=status.HTTP_201_CREATED)
+        return Response(_issue_response(issue, request), status=status.HTTP_201_CREATED)
 
 
 class IssueDetailView(APIView):
@@ -600,7 +793,7 @@ class IssueDetailView(APIView):
                 action_url='/board',
                 metadata={'issueId': issue.uid, 'issueKey': issue.key},
             )
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
     def delete(self, request, issue_uid):
         issue = _issue_by_uid(issue_uid)
@@ -624,7 +817,7 @@ class IssueMoveView(APIView):
             return Response({'detail': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
         issue.status = new_status
         issue.save(update_fields=['status', 'updated_at'])
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueCommentCreateView(APIView):
@@ -649,7 +842,70 @@ class IssueCommentCreateView(APIView):
             action_url='/board',
             metadata={'issueId': issue.uid, 'issueKey': issue.key},
         )
-        return Response(IssueSerializer(issue).data)
+        mentioned_users = _resolve_mentioned_users(issue, content)
+        standard_recipient_ids = {user.id for user in recipients if user}
+        mentioned_users = [user for user in mentioned_users if user.id not in standard_recipient_ids]
+        if mentioned_users:
+            _create_notifications(
+                mentioned_users,
+                title=f"You were mentioned in {issue.key}",
+                message=f"{request.user.get_full_name() or request.user.username} mentioned you in a comment on '{issue.title}'.",
+                notification_type=Notification.TYPE_COMMENT,
+                actor=request.user,
+                action_url='/board',
+                metadata={'issueId': issue.uid, 'issueKey': issue.key, 'event': 'mention'},
+            )
+        return Response(_issue_response(issue, request))
+
+
+class IssueCommentDetailView(APIView):
+    def patch(self, request, issue_uid, comment_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        comment = IssueComment.objects.filter(issue=issue, uid=comment_uid).first()
+        if not comment:
+            return Response({'detail': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_manager = can_manage_sprints(request.user)
+        is_author = comment.author_id == request.user.id
+        if not (is_manager or is_author):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required'}, status=status.HTTP_400_BAD_REQUEST)
+        comment.content = content
+        comment.is_edited = True
+        comment.save(update_fields=['content', 'is_edited', 'updated_at'])
+        mentioned_users = _resolve_mentioned_users(issue, content)
+        if mentioned_users:
+            _create_notifications(
+                mentioned_users,
+                title=f"You were mentioned in {issue.key}",
+                message=f"{request.user.get_full_name() or request.user.username} mentioned you in an updated comment on '{issue.title}'.",
+                notification_type=Notification.TYPE_COMMENT,
+                actor=request.user,
+                action_url='/board',
+                metadata={'issueId': issue.uid, 'issueKey': issue.key, 'event': 'mention'},
+            )
+        return Response(_issue_response(issue, request))
+
+    def delete(self, request, issue_uid, comment_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        comment = IssueComment.objects.filter(issue=issue, uid=comment_uid).first()
+        if not comment:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        is_manager = can_manage_sprints(request.user)
+        is_author = comment.author_id == request.user.id
+        if not (is_manager or is_author):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        comment.delete()
+        return Response(_issue_response(issue, request))
 
 
 class IssueLogTimeView(APIView):
@@ -667,7 +923,7 @@ class IssueLogTimeView(APIView):
             return Response({'detail': 'hours must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
         issue.logged_hours += hours
         issue.save(update_fields=['logged_hours', 'updated_at'])
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueWatchToggleView(APIView):
@@ -679,7 +935,7 @@ class IssueWatchToggleView(APIView):
             issue.watchers.remove(request.user)
         else:
             issue.watchers.add(request.user)
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueLinkCreateView(APIView):
@@ -697,7 +953,7 @@ class IssueLinkCreateView(APIView):
         if link_type not in [c[0] for c in IssueLink.TYPE_CHOICES]:
             return Response({'detail': 'Invalid link type'}, status=status.HTTP_400_BAD_REQUEST)
         IssueLink.objects.get_or_create(issue=issue, target_issue=target_issue, link_type=link_type)
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
 
 
 class IssueLinkDeleteView(APIView):
@@ -708,7 +964,289 @@ class IssueLinkDeleteView(APIView):
         if not can_edit_issue(request.user, issue):
             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         IssueLink.objects.filter(issue=issue, uid=link_uid).delete()
-        return Response(IssueSerializer(issue).data)
+        return Response(_issue_response(issue, request))
+
+
+class IssueAttachmentUploadView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, issue_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not can_edit_issue(request.user, issue):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        incoming = request.FILES.get('file')
+        if not incoming:
+            return Response({'detail': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        IssueAttachment.objects.create(
+            issue=issue,
+            uploaded_by=request.user,
+            file=incoming,
+            original_name=incoming.name,
+            size=incoming.size,
+        )
+        return Response(_issue_response(issue, request), status=status.HTTP_201_CREATED)
+
+
+class IssueAttachmentDeleteView(APIView):
+    def delete(self, request, issue_uid, attachment_uid):
+        issue = _issue_by_uid(issue_uid)
+        if not issue:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if not can_edit_issue(request.user, issue):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        attachment = IssueAttachment.objects.filter(issue=issue, uid=attachment_uid).first()
+        if attachment:
+            attachment.file.delete(save=False)
+            attachment.delete()
+        return Response(_issue_response(issue, request))
+
+
+class ChatRoomListView(APIView):
+    def get(self, request):
+        room_type = request.query_params.get('type')
+        project_uid = request.query_params.get('project_id')
+        qs = ChatRoom.objects.filter(chat_participants__user=request.user).distinct()
+        if room_type in [ChatRoom.TYPE_DM, ChatRoom.TYPE_CHANNEL]:
+            qs = qs.filter(room_type=room_type)
+        if project_uid:
+            qs = qs.filter(project__uid=project_uid)
+        qs = qs.select_related('project').prefetch_related(
+            'chat_participants__user__profile',
+            'messages__sender__profile',
+        )
+        return Response(ChatRoomSerializer(qs, many=True, context={'request': request}).data)
+
+
+class ChatDirectMessageCreateView(APIView):
+    def post(self, request):
+        target_user = _user_by_uid(request.data.get('targetUserId'))
+        if not target_user:
+            return Response({'detail': 'targetUserId is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if target_user.id == request.user.id:
+            return Response({'detail': 'Cannot create DM with yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dm_key = _dm_key(request.user.id, target_user.id)
+        room = ChatRoom.objects.filter(dm_key=dm_key, room_type=ChatRoom.TYPE_DM).first()
+        created = False
+        if not room:
+            created = True
+            room = ChatRoom.objects.create(
+                room_type=ChatRoom.TYPE_DM,
+                created_by=request.user,
+                dm_key=dm_key,
+            )
+            ChatParticipant.objects.bulk_create([
+                ChatParticipant(room=room, user=request.user, role=ChatParticipant.ROLE_OWNER),
+                ChatParticipant(room=room, user=target_user, role=ChatParticipant.ROLE_MEMBER),
+            ])
+
+        room_data = ChatRoomSerializer(room, context={'request': request}).data
+        return Response(room_data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class ChatChannelCreateView(APIView):
+    def post(self, request):
+        project = _project_by_uid(request.data.get('projectId'))
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({'detail': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dup_qs = ChatRoom.objects.filter(room_type=ChatRoom.TYPE_CHANNEL, name__iexact=name)
+        if project:
+            dup_qs = dup_qs.filter(project=project)
+        else:
+            dup_qs = dup_qs.filter(project__isnull=True)
+        if dup_qs.exists():
+            return Response({'detail': 'Channel name already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+        member_ids = request.data.get('memberIds') or []
+        members = User.objects.filter(profile__uid__in=member_ids)
+
+        room = ChatRoom.objects.create(
+            room_type=ChatRoom.TYPE_CHANNEL,
+            project=project,
+            name=name,
+            is_private=bool(request.data.get('isPrivate', False)),
+            created_by=request.user,
+        )
+        ChatParticipant.objects.create(room=room, user=request.user, role=ChatParticipant.ROLE_OWNER)
+        for member in members:
+            if member.id == request.user.id:
+                continue
+            ChatParticipant.objects.get_or_create(room=room, user=member, defaults={'role': ChatParticipant.ROLE_MEMBER})
+
+        return Response(ChatRoomSerializer(room, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class ChatChannelDetailView(APIView):
+    def patch(self, request, room_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or room.room_type != ChatRoom.TYPE_CHANNEL:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        participant = room.chat_participants.filter(user=request.user).first()
+        if not participant:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        if participant.role != ChatParticipant.ROLE_OWNER and not can_manage_sprints(request.user):
+            return Response({'detail': 'Only owner/admin/project manager can edit channel'}, status=status.HTTP_403_FORBIDDEN)
+
+        if 'name' in request.data:
+            name = (request.data.get('name') or '').strip()
+            if not name:
+                return Response({'detail': 'name cannot be blank'}, status=status.HTTP_400_BAD_REQUEST)
+            room.name = name
+        if 'isPrivate' in request.data:
+            room.is_private = bool(request.data.get('isPrivate'))
+        room.save(update_fields=['name', 'is_private', 'updated_at'])
+        return Response(ChatRoomSerializer(room, context={'request': request}).data)
+
+
+class ChatChannelMemberAddView(APIView):
+    def post(self, request, room_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or room.room_type != ChatRoom.TYPE_CHANNEL:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        participant = room.chat_participants.filter(user=request.user).first()
+        if not participant:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        if participant.role != ChatParticipant.ROLE_OWNER and not can_manage_sprints(request.user):
+            return Response({'detail': 'Only owner/admin/project manager can add members'}, status=status.HTTP_403_FORBIDDEN)
+
+        user = _user_by_uid(request.data.get('userId'))
+        if not user:
+            return Response({'detail': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+        ChatParticipant.objects.get_or_create(room=room, user=user, defaults={'role': ChatParticipant.ROLE_MEMBER})
+        return Response(ChatRoomSerializer(room, context={'request': request}).data)
+
+
+class ChatChannelMemberRemoveView(APIView):
+    def delete(self, request, room_uid, user_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or room.room_type != ChatRoom.TYPE_CHANNEL:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        participant = room.chat_participants.filter(user=request.user).first()
+        if not participant:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        if participant.role != ChatParticipant.ROLE_OWNER and not can_manage_sprints(request.user):
+            return Response({'detail': 'Only owner/admin/project manager can remove members'}, status=status.HTTP_403_FORBIDDEN)
+
+        user = _user_by_uid(user_uid)
+        if not user:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        room.chat_participants.filter(user=user).exclude(role=ChatParticipant.ROLE_OWNER).delete()
+        return Response(ChatRoomSerializer(room, context={'request': request}).data)
+
+
+class ChatRoomMessagesView(APIView):
+    def get(self, request, room_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or not _is_chat_member(room, request.user):
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        limit = min(max(int(request.query_params.get('limit', 50)), 1), 100)
+        before_uid = request.query_params.get('before')
+        qs = ChatMessage.objects.filter(room=room).select_related('sender__profile').order_by('-created_at')
+        if before_uid:
+            before_msg = ChatMessage.objects.filter(room=room, uid=before_uid).first()
+            if before_msg:
+                qs = qs.filter(created_at__lt=before_msg.created_at)
+        messages = list(qs[:limit])
+        messages.reverse()
+        return Response(ChatMessageSerializer(messages, many=True).data)
+
+    def post(self, request, room_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or not _is_chat_member(room, request.user):
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required'}, status=status.HTTP_400_BAD_REQUEST)
+        message = ChatMessage.objects.create(room=room, sender=request.user, content=content)
+        room.save(update_fields=['updated_at'])
+        payload = ChatMessageSerializer(message).data
+        _emit_chat_event(room, 'message_created', payload)
+
+        recipients = room.participants.exclude(id=request.user.id)
+        room_name = room.name or 'Direct Message'
+        _create_notifications(
+            recipients,
+            title=f"New message in {room_name}" if room.room_type == ChatRoom.TYPE_CHANNEL else f"New message from {request.user.get_full_name() or request.user.username}",
+            message=content[:160],
+            notification_type=Notification.TYPE_CHAT,
+            actor=request.user,
+            action_url='/chat',
+            metadata={'roomId': room.uid, 'roomType': room.room_type, 'projectId': room.project.uid if room.project else None},
+        )
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class ChatMessageDetailView(APIView):
+    def patch(self, request, message_uid):
+        message = _chat_message_by_uid(message_uid)
+        if not message:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not _is_chat_member(message.room, request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        if message.sender_id != request.user.id and not can_manage_sprints(request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required'}, status=status.HTTP_400_BAD_REQUEST)
+        message.content = content
+        message.is_edited = True
+        message.edited_at = timezone.now()
+        message.save(update_fields=['content', 'is_edited', 'edited_at', 'updated_at'])
+        payload = ChatMessageSerializer(message).data
+        _emit_chat_event(message.room, 'message_updated', payload)
+        return Response(payload)
+
+    def delete(self, request, message_uid):
+        message = _chat_message_by_uid(message_uid)
+        if not message:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if not _is_chat_member(message.room, request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        if message.sender_id != request.user.id and not can_manage_sprints(request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        message.is_deleted = True
+        message.deleted_at = timezone.now()
+        message.content = '[deleted]'
+        message.save(update_fields=['is_deleted', 'deleted_at', 'content', 'updated_at'])
+        payload = ChatMessageSerializer(message).data
+        _emit_chat_event(message.room, 'message_deleted', payload)
+        return Response(payload)
+
+
+class ChatRoomReadView(APIView):
+    def post(self, request, room_uid):
+        room = _chat_room_by_uid(room_uid)
+        if not room or not _is_chat_member(room, request.user):
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        participant = room.chat_participants.filter(user=request.user).first()
+        if not participant:
+            return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        message_uid = request.data.get('messageId')
+        target = ChatMessage.objects.filter(room=room, uid=message_uid).first() if message_uid else room.messages.order_by('-created_at').first()
+        participant.last_read_message = target
+        participant.last_read_at = timezone.now()
+        participant.save(update_fields=['last_read_message', 'last_read_at'])
+        _emit_chat_event(
+            room,
+            'read_receipt',
+            {
+                'roomId': room.uid,
+                'userId': request.user.profile.uid,
+                'messageId': target.uid if target else None,
+                'readAt': participant.last_read_at.isoformat(),
+            },
+        )
+        return Response({'success': True})
 
 
 class DashboardReportView(APIView):
@@ -727,9 +1265,6 @@ class DashboardReportView(APIView):
 
         total = sprint_issues.count()
         done_percent = round((by_status['done'] / total) * 100) if total else 0
-        total_points = sum(i.story_points or 0 for i in sprint_issues)
-        done_points = sum(i.story_points or 0 for i in sprint_issues.filter(status='done'))
-
         by_assignee = defaultdict(int)
         for item in sprint_issues.exclude(assignee=None).values('assignee__profile__uid'):
             by_assignee[item['assignee__profile__uid']] += 1
@@ -741,11 +1276,9 @@ class DashboardReportView(APIView):
                 'byStatus': by_status,
                 'total': total,
                 'donePercent': done_percent,
-                'totalPoints': total_points,
-                'donePoints': done_points,
                 'byAssignee': by_assignee,
             },
-            'recentActivity': IssueSerializer(recent_issues, many=True).data,
+            'recentActivity': IssueSerializer(recent_issues, many=True, context={'request': request}).data,
         })
 
 
@@ -757,17 +1290,17 @@ class BurndownReportView(APIView):
 
         start = sprint.start_date
         end = sprint.end_date
-        points_total = sum(i.story_points or 0 for i in sprint.issues.all())
+        total_issues = sprint.issues.count()
         days = (end - start).days or 1
         data = []
         for idx in range(days + 1):
             day = start + timedelta(days=idx)
-            done_points = 0
+            done_issues = 0
             for issue in sprint.issues.filter(status='done'):
                 if issue.updated_at.date() <= day:
-                    done_points += issue.story_points or 0
-            remaining = max(points_total - done_points, 0)
-            ideal = max(round(points_total - ((points_total / days) * idx), 1), 0)
+                    done_issues += 1
+            remaining = max(total_issues - done_issues, 0)
+            ideal = max(round(total_issues - ((total_issues / days) * idx), 1), 0)
             data.append({'date': day.isoformat(), 'remaining': remaining, 'ideal': ideal})
         return Response(data)
 
@@ -781,8 +1314,8 @@ class VelocityReportView(APIView):
         payload = []
         for sprint in sprints:
             sprint_issues = Issue.objects.filter(sprint=sprint)
-            committed = sum(i.story_points or 0 for i in sprint_issues)
-            completed = sum(i.story_points or 0 for i in sprint_issues.filter(status='done'))
+            committed = sprint_issues.count()
+            completed = sprint_issues.filter(status='done').count()
             payload.append({'sprint': sprint.name, 'committed': committed, 'completed': completed})
         return Response(payload)
 

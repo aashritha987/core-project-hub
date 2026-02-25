@@ -1,24 +1,110 @@
-import { Bell, HelpCircle, Plus, LogOut, Shield } from 'lucide-react';
+import { Bell, HelpCircle, Plus, LogOut, Shield, Moon, Sun, Timer, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CreateIssueDialog } from '@/components/issues/CreateIssueDialog';
 import { ROLE_LABELS } from '@/types/jira';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '@/contexts/ThemeContext';
+import { useLiveTimer } from '@/contexts/LiveTimerContext';
+import { apiRequest } from '@/lib/api';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from '@/components/ui/sonner';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export function AppHeader() {
-  const { currentProject } = useProject();
+  const { currentProject, issues } = useProject();
   const { currentUser, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { notifications, unreadCount, markAsRead, markAllAsRead, loading } = useNotifications();
+  const { state: timerState, start, pause, resume, stop, getElapsedMs } = useLiveTimer();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const [timerDialogOpen, setTimerDialogOpen] = useState(false);
+  const [timerIssueId, setTimerIssueId] = useState<string>('');
+  const [, setTick] = useState(0);
+
+  const allNonSubtaskIssues = useMemo(
+    () => issues.filter((i) => !i.parentId),
+    [issues],
+  );
+  const availableIssues = useMemo(() => {
+    if (!currentUser) return [];
+    return allNonSubtaskIssues.filter(
+      (i) => i.assigneeId === currentUser.id || i.reporterId === currentUser.id,
+    );
+  }, [allNonSubtaskIssues, currentUser]);
+  const activeTimerIssue = useMemo(
+    () => allNonSubtaskIssues.find((i) => i.id === timerState.issueId),
+    [allNonSubtaskIssues, timerState.issueId],
+  );
+
+  useEffect(() => {
+    if (timerState.status !== 'running') return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [timerState.status]);
+
+  useEffect(() => {
+    if (!timerDialogOpen) return;
+    if (timerIssueId) return;
+    if (availableIssues.length > 0) {
+      setTimerIssueId(availableIssues[0].id);
+    }
+  }, [timerDialogOpen, timerIssueId, availableIssues]);
+
+  const formatDuration = (ms: number) => {
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600)
+      .toString()
+      .padStart(2, '0');
+    const m = Math.floor((totalSec % 3600) / 60)
+      .toString()
+      .padStart(2, '0');
+    const s = (totalSec % 60).toString().padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  };
+
+  const handleStartTimer = () => {
+    if (!timerIssueId) return;
+    start(timerIssueId);
+    toast.success('Timer started', {
+      description: `Tracking ${availableIssues.find((i) => i.id === timerIssueId)?.key || 'ticket'}`,
+    });
+    setTimerDialogOpen(false);
+  };
+
+  const handleStopTimer = async () => {
+    const result = stop();
+    if (!result) return;
+    const hours = Number((result.elapsedMs / 3600000).toFixed(3));
+    if (hours <= 0) {
+      toast.info('Timer stopped', { description: 'No time logged because duration was too short.' });
+      return;
+    }
+    try {
+      await apiRequest(`/issues/${result.issueId}/log-time/`, {
+        method: 'POST',
+        body: { hours },
+      });
+      toast.success('Time logged', {
+        description: `${hours}h added to ${activeTimerIssue?.key || result.issueId}`,
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to log time', {
+        description: err instanceof Error ? err.message : 'Please try again.',
+      });
+    }
+  };
 
   const openNotification = async (id: string, actionUrl: string) => {
     await markAsRead(id);
@@ -36,6 +122,42 @@ export function AppHeader() {
             <Plus className="h-3.5 w-3.5" />
             Create
           </Button>
+          <Button
+            variant={timerState.status === 'running' ? 'default' : 'outline'}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => {
+              if (timerState.status === 'running' || timerState.status === 'paused') void handleStopTimer();
+              else setTimerDialogOpen(true);
+            }}
+          >
+            <Timer className="h-3.5 w-3.5" />
+            {timerState.status === 'idle' ? 'Start Timer' : `Stop ${formatDuration(getElapsedMs())}`}
+          </Button>
+          {timerState.status !== 'idle' ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  if (timerState.status === 'running') {
+                    pause();
+                    toast.info('Timer paused');
+                  } else if (timerState.status === 'paused') {
+                    resume();
+                    toast.info('Timer resumed');
+                  }
+                }}
+              >
+                {timerState.status === 'running' ? 'Pause' : 'Resume'}
+              </Button>
+              <Badge variant="outline" className="h-8 px-2 text-2xs gap-1">
+                <Timer className="h-3 w-3" />
+                {activeTimerIssue?.key || 'Ticket'} · {timerState.status}
+              </Badge>
+            </>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8 relative">
@@ -84,6 +206,30 @@ export function AppHeader() {
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/help')}>
             <HelpCircle className="h-4 w-4 text-muted-foreground" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => navigate('/chat')}
+            title="Open Chat"
+            aria-label="Open Chat"
+          >
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? (
+              <Sun className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <Moon className="h-4 w-4 text-muted-foreground" />
+            )}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Avatar className="h-7 w-7 cursor-pointer">
@@ -112,6 +258,47 @@ export function AppHeader() {
         </div>
       </header>
       <CreateIssueDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <Dialog open={timerDialogOpen} onOpenChange={setTimerDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Start Live Timer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Select a ticket assigned to you or reported by you before starting the timer.
+            </p>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Ticket</Label>
+              <Select value={timerIssueId} onValueChange={setTimerIssueId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select ticket" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableIssues.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No tickets available
+                    </SelectItem>
+                  ) : (
+                    availableIssues.map((issue) => (
+                      <SelectItem key={issue.id} value={issue.id}>
+                        {issue.key} - {issue.title}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTimerDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleStartTimer} disabled={!timerIssueId || availableIssues.length === 0}>
+              Start Timer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

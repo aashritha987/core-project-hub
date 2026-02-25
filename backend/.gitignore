@@ -10,3 +10,4 @@ env/
 ENV/
 backend/.venv/
 backend/venv/
+db.sqlite3

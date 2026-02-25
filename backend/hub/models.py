@@ -51,6 +51,26 @@ def notification_uid():
     return make_uid('n')
 
 
+def attachment_uid():
+    return make_uid('a')
+
+
+def onboarding_uid():
+    return make_uid('ob')
+
+
+def platform_instruction_uid():
+    return make_uid('pi')
+
+
+def chat_room_uid():
+    return make_uid('cr')
+
+
+def chat_message_uid():
+    return make_uid('cm')
+
+
 class UserProfile(models.Model):
     ROLE_ADMIN = 'admin'
     ROLE_PM = 'project_manager'
@@ -89,6 +109,65 @@ class Project(TimeStampedModel):
 
     def __str__(self):
         return f"{self.key} - {self.name}"
+
+
+class ProjectOnboarding(TimeStampedModel):
+    uid = models.CharField(max_length=32, unique=True, default=onboarding_uid)
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name='onboarding')
+    overview = models.TextField(blank=True, default='')
+    repository_url = models.URLField(blank=True, default='')
+    prerequisites = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_onboarding_guides',
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_onboarding_guides',
+    )
+
+
+class PlatformSetupInstruction(TimeStampedModel):
+    PLATFORM_WINDOWS = 'windows'
+    PLATFORM_LINUX = 'linux'
+    PLATFORM_MACOS = 'macos'
+    PLATFORM_OTHER = 'other'
+    PLATFORM_CHOICES = [
+        (PLATFORM_WINDOWS, 'Windows'),
+        (PLATFORM_LINUX, 'Linux'),
+        (PLATFORM_MACOS, 'macOS'),
+        (PLATFORM_OTHER, 'Other'),
+    ]
+
+    uid = models.CharField(max_length=32, unique=True, default=platform_instruction_uid)
+    onboarding = models.ForeignKey(ProjectOnboarding, on_delete=models.CASCADE, related_name='instructions')
+    platform = models.CharField(max_length=16, choices=PLATFORM_CHOICES)
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    display_order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_platform_instructions',
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_platform_instructions',
+    )
+
+    class Meta:
+        ordering = ['platform', 'display_order', 'created_at']
 
 
 class Label(models.Model):
@@ -173,7 +252,6 @@ class Issue(TimeStampedModel):
     assignee = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='assigned_issues')
     reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='reported_issues')
     labels = models.ManyToManyField(Label, blank=True, related_name='issues')
-    story_points = models.IntegerField(null=True, blank=True)
     sprint = models.ForeignKey(Sprint, null=True, blank=True, on_delete=models.SET_NULL, related_name='issues')
     epic = models.ForeignKey(Epic, null=True, blank=True, on_delete=models.SET_NULL, related_name='issues')
     parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='subtasks')
@@ -189,6 +267,8 @@ class IssueComment(models.Model):
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_edited = models.BooleanField(default=False)
 
 
 class IssueLink(models.Model):
@@ -216,6 +296,7 @@ class Notification(models.Model):
     TYPE_STATUS = 'status_change'
     TYPE_SPRINT = 'sprint'
     TYPE_SYSTEM = 'system'
+    TYPE_CHAT = 'chat'
     TYPE_CHOICES = [
         (TYPE_INFO, 'Info'),
         (TYPE_ASSIGNMENT, 'Assignment'),
@@ -223,6 +304,7 @@ class Notification(models.Model):
         (TYPE_STATUS, 'Status Change'),
         (TYPE_SPRINT, 'Sprint'),
         (TYPE_SYSTEM, 'System'),
+        (TYPE_CHAT, 'Chat'),
     ]
 
     uid = models.CharField(max_length=32, unique=True, default=notification_uid)
@@ -233,6 +315,91 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False)
     action_url = models.CharField(max_length=255, blank=True, default='')
     metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ChatRoom(TimeStampedModel):
+    TYPE_DM = 'dm'
+    TYPE_CHANNEL = 'channel'
+    TYPE_CHOICES = [
+        (TYPE_DM, 'Direct Message'),
+        (TYPE_CHANNEL, 'Channel'),
+    ]
+
+    uid = models.CharField(max_length=32, unique=True, default=chat_room_uid)
+    room_type = models.CharField(max_length=16, choices=TYPE_CHOICES)
+    project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE, related_name='chat_rooms')
+    name = models.CharField(max_length=255, blank=True, default='')
+    is_private = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_chat_rooms',
+    )
+    dm_key = models.CharField(max_length=128, blank=True, null=True, unique=True)
+    participants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through='ChatParticipant',
+        related_name='chat_rooms',
+    )
+
+    class Meta:
+        ordering = ['-updated_at']
+
+
+class ChatMessage(models.Model):
+    uid = models.CharField(max_length=32, unique=True, default=chat_message_uid)
+    room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='chat_messages')
+    content = models.TextField()
+    is_edited = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+
+class ChatParticipant(models.Model):
+    ROLE_OWNER = 'owner'
+    ROLE_MEMBER = 'member'
+    ROLE_CHOICES = [
+        (ROLE_OWNER, 'Owner'),
+        (ROLE_MEMBER, 'Member'),
+    ]
+
+    room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, related_name='chat_participants')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='chat_participations')
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_MEMBER)
+    last_read_message = models.ForeignKey(
+        ChatMessage,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+    )
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('room', 'user')
+
+
+class IssueAttachment(models.Model):
+    uid = models.CharField(max_length=32, unique=True, default=attachment_uid)
+    issue = models.ForeignKey(Issue, on_delete=models.CASCADE, related_name='attachments')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    file = models.FileField(upload_to='issue_attachments/%Y/%m/%d/')
+    original_name = models.CharField(max_length=255)
+    size = models.BigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

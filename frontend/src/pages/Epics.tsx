@@ -35,14 +35,12 @@ export default function Epics() {
   };
 
   const epicStats = useMemo(() => {
-    const stats: Record<string, { total: number; done: number; totalPoints: number; donePoints: number }> = {};
+    const stats: Record<string, { total: number; done: number }> = {};
     epics.forEach(e => {
       const epicIssues = issues.filter(i => i.epicId === e.id);
       stats[e.id] = {
         total: epicIssues.length,
         done: epicIssues.filter(i => i.status === 'done').length,
-        totalPoints: epicIssues.reduce((s, i) => s + (i.storyPoints || 0), 0),
-        donePoints: epicIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0),
       };
     });
     return stats;
@@ -97,8 +95,8 @@ export default function Epics() {
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4 jira-scrollbar">
         {epics.map(epic => {
-          const stat = epicStats[epic.id] || { total: 0, done: 0, totalPoints: 0, donePoints: 0 };
-          const pct = stat.totalPoints > 0 ? Math.round((stat.donePoints / stat.totalPoints) * 100) : 0;
+          const stat = epicStats[epic.id] || { total: 0, done: 0 };
+          const pct = stat.total > 0 ? Math.round((stat.done / stat.total) * 100) : 0;
           const epicIssues = issues.filter(i => i.epicId === epic.id);
 
           return (
@@ -109,7 +107,6 @@ export default function Epics() {
                 <Zap className="h-4 w-4" style={{ color: epic.color }} />
                 <span className="text-sm font-semibold flex-1">{epic.name}</span>
                 <Badge variant="outline" className="text-2xs">{stat.done}/{stat.total} done</Badge>
-                <Badge variant="secondary" className="text-2xs">{stat.donePoints}/{stat.totalPoints} pts</Badge>
                 <div className="w-24">
                   <Progress value={pct} className="h-1.5" />
                 </div>

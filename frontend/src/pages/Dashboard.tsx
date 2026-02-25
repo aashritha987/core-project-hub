@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,27 +14,45 @@ export default function Dashboard() {
   const { issues, currentProject, sprints, epics, users } = useProject();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const [myIssuesFilter, setMyIssuesFilter] = useState<'assigned' | 'reported' | 'both'>('assigned');
 
   const activeSprint = sprints.find(s => s.status === 'active');
   const sprintIssues = activeSprint ? issues.filter(i => i.sprintId === activeSprint.id) : [];
+  const statusScopeIssues = activeSprint
+    ? sprintIssues
+    : issues;
+  const workloadIssues = activeSprint
+    ? sprintIssues
+    : issues.filter(i => !i.parentId);
 
   const stats = useMemo(() => {
     const byStatus = { todo: 0, in_progress: 0, in_review: 0, done: 0 };
-    sprintIssues.forEach(i => byStatus[i.status]++);
-    const total = sprintIssues.length;
+    statusScopeIssues.forEach(i => byStatus[i.status]++);
+    const total = statusScopeIssues.length;
     const donePercent = total > 0 ? Math.round((byStatus.done / total) * 100) : 0;
-    const totalPoints = sprintIssues.reduce((s, i) => s + (i.storyPoints || 0), 0);
-    const donePoints = sprintIssues.filter(i => i.status === 'done').reduce((s, i) => s + (i.storyPoints || 0), 0);
 
     const byAssignee: Record<string, number> = {};
-    sprintIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
+    workloadIssues.forEach(i => { if (i.assigneeId) byAssignee[i.assigneeId] = (byAssignee[i.assigneeId] || 0) + 1; });
 
-    return { byStatus, total, donePercent, totalPoints, donePoints, byAssignee };
-  }, [sprintIssues]);
+    return { byStatus, total, donePercent, byAssignee };
+  }, [statusScopeIssues, workloadIssues]);
 
-  const recentActivity = issues
+  const recentActivity = [...issues]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5);
+
+  const myOpenIssues = useMemo(() => {
+    if (!currentUser) return [];
+    return issues
+      .filter((i) => {
+        if (i.status === 'done') return false;
+        if (myIssuesFilter === 'assigned') return i.assigneeId === currentUser.id;
+        if (myIssuesFilter === 'reported') return i.reporterId === currentUser.id;
+        return i.assigneeId === currentUser.id || i.reporterId === currentUser.id;
+      })
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(0, 8);
+  }, [issues, currentUser, myIssuesFilter]);
 
   const statusColors: Record<Status, string> = {
     todo: 'bg-status-todo',
@@ -74,6 +92,9 @@ export default function Dashboard() {
               </div>
             </div>
             <Progress value={stats.donePercent} className="mt-3 h-1.5" />
+            <p className="text-2xs text-muted-foreground mt-2">
+              {activeSprint ? activeSprint.name : 'No active sprint · showing overall project'}
+            </p>
           </CardContent>
         </Card>
 
@@ -88,7 +109,7 @@ export default function Dashboard() {
                 <CheckCircle2 className="h-5 w-5 text-jira-green" />
               </div>
             </div>
-            <p className="text-2xs text-muted-foreground mt-3">{stats.donePoints} of {stats.totalPoints} story points</p>
+            <p className="text-2xs text-muted-foreground mt-3">{stats.byStatus.done} of {stats.total} issues</p>
           </CardContent>
         </Card>
 
@@ -181,6 +202,62 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm font-semibold">My Open Issues</CardTitle>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                className={`text-2xs px-2 py-1 rounded border ${myIssuesFilter === 'assigned' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border text-muted-foreground'}`}
+                onClick={() => setMyIssuesFilter('assigned')}
+              >
+                Assigned
+              </button>
+              <button
+                type="button"
+                className={`text-2xs px-2 py-1 rounded border ${myIssuesFilter === 'reported' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border text-muted-foreground'}`}
+                onClick={() => setMyIssuesFilter('reported')}
+              >
+                Reported
+              </button>
+              <button
+                type="button"
+                className={`text-2xs px-2 py-1 rounded border ${myIssuesFilter === 'both' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border text-muted-foreground'}`}
+                onClick={() => setMyIssuesFilter('both')}
+              >
+                Both
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {myOpenIssues.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {myIssuesFilter === 'assigned' && 'No open issues assigned to you.'}
+              {myIssuesFilter === 'reported' && 'No open issues reported by you.'}
+              {myIssuesFilter === 'both' && 'No open issues assigned/reported by you.'}
+            </p>
+          ) : (
+            myOpenIssues.map((issue) => (
+              <div
+                key={issue.id}
+                className="flex items-center gap-2 p-2 rounded-md hover:bg-accent/50 cursor-pointer transition-colors"
+                onClick={() => navigate('/board')}
+              >
+                <IssueTypeIcon type={issue.type} className="shrink-0" />
+                <span className="text-2xs font-medium text-muted-foreground shrink-0">{issue.key}</span>
+                <span className="text-sm truncate flex-1">{issue.title}</span>
+                <Badge variant="outline" className="text-2xs shrink-0">
+                  {STATUS_LABELS[issue.status]}
+                </Badge>
+                <PriorityIcon priority={issue.priority} />
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       {/* Sprint Status Distribution */}
       {activeSprint && (

@@ -96,6 +96,19 @@ export default {
           column: "hsl(var(--board-column-bg))",
           "column-header": "hsl(var(--board-column-header))",
         },
+        presence: {
+          online: "hsl(var(--presence-online))",
+        },
+        avatar: {
+          1: "hsl(var(--avatar-1))",
+          2: "hsl(var(--avatar-2))",
+          3: "hsl(var(--avatar-3))",
+          4: "hsl(var(--avatar-4))",
+          5: "hsl(var(--avatar-5))",
+          6: "hsl(var(--avatar-6))",
+          7: "hsl(var(--avatar-7))",
+          8: "hsl(var(--avatar-8))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -119,12 +132,17 @@ export default {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        "slide-in-right": {
+          from: { transform: "translateX(100%)", opacity: "0" },
+          to: { transform: "translateX(0)", opacity: "1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "slide-in": "slide-in 0.2s ease-out",
         "fade-in": "fade-in 0.15s ease-out",
+        "slide-in-right": "slide-in-right 0.2s ease-out",
       },
       fontSize: {
         "2xs": "0.6875rem",
